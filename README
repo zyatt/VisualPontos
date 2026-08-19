@@ -1,0 +1,7 @@
+Para gerar um APK release do Flutter:
+
+flutter build apk --release
+
+O arquivo gerado fica em:
+
+build/app/outputs/flutter-apk/app-release.apk
