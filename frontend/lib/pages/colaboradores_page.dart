@@ -6,6 +6,7 @@ import '../models/colaborador.dart';
 import '../providers/colaborador_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/relatorio_geral_penalidades.dart';
 
 class ColaboradoresPage extends StatefulWidget {
   const ColaboradoresPage({super.key});
@@ -46,6 +47,10 @@ class _ColaboradoresPageState extends State<ColaboradoresPage> {
     }
   }
 
+  Future<void> _abrirRelatorioGeral() async {
+    await abrirRelatorioGeralPenalidades(context);
+  }
+
   Future<void> _abrirCadastro() async {
     final cadastrou = await context.push<bool>('/colaboradores/novo');
     if (cadastrou == true && mounted) {
@@ -71,60 +76,181 @@ class _ColaboradoresPageState extends State<ColaboradoresPage> {
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
+          tooltip: 'Voltar',
+          style: ButtonStyle(
+            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+          ),
           onPressed: () => context.pop(),
         ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: FilledButton.icon(
-              onPressed: _abrirCadastro,
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Novo colaborador'),
+            child: Tooltip(
+              message: 'Novo colaborador',
+              child: FilledButton.icon(
+                onPressed: _abrirCadastro,
+                style: ButtonStyle(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Novo colaborador'),
+              ),
             ),
           ),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Atualizar',
+            style: ButtonStyle(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            onPressed: provider.carregando ? null : _carregar,
+          ),
+          const SizedBox(width: 4),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _carregar,
-        child: Builder(
-          builder: (context) {
-            if (provider.carregando && provider.colaboradores.isEmpty) {
-              return const Center(child: CircularProgressIndicator());
-            }
+      body: provider.carregando
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 760),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                      child: _RelatorioGeralCard(
+                        onTap: provider.colaboradores.isEmpty
+                            ? null
+                            : _abrirRelatorioGeral,
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _carregar,
+                    child: Builder(
+                      builder: (context) {
+                        if (provider.erro != null &&
+                            provider.colaboradores.isEmpty) {
+                          return _EstadoVazio(
+                            icon: Icons.error_outline_rounded,
+                            mensagem: provider.erro!,
+                            corIcone: AppTheme.error,
+                          );
+                        }
 
-            if (provider.erro != null && provider.colaboradores.isEmpty) {
-              return _EstadoVazio(
-                icon: Icons.error_outline_rounded,
-                mensagem: provider.erro!,
-                corIcone: AppTheme.error,
-              );
-            }
+                        if (provider.colaboradores.isEmpty) {
+                          return const _EstadoVazio(
+                            icon: Icons.groups_2_outlined,
+                            mensagem: 'Nenhum colaborador cadastrado ainda.',
+                          );
+                        }
 
-            if (provider.colaboradores.isEmpty) {
-              return const _EstadoVazio(
-                icon: Icons.groups_2_outlined,
-                mensagem: 'Nenhum colaborador cadastrado ainda.',
-              );
-            }
+                        return Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 760),
+                            child: ListView.separated(
+                              padding:
+                                  const EdgeInsets.fromLTRB(16, 12, 16, 96),
+                              itemCount: provider.colaboradores.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 10),
+                              itemBuilder: (context, index) {
+                                final colaborador =
+                                    provider.colaboradores[index];
+                                return _ColaboradorTile(
+                                  colaborador: colaborador,
+                                  onTap: () => _abrirPontuacao(colaborador),
+                                );
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
 
-            return Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 760),
-                child: ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                  itemCount: provider.colaboradores.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final colaborador = provider.colaboradores[index];
-                    return _ColaboradorTile(
-                      colaborador: colaborador,
-                      onTap: () => _abrirPontuacao(colaborador),
-                    );
-                  },
+class _RelatorioGeralCard extends StatelessWidget {
+  final VoidCallback? onTap;
+
+  const _RelatorioGeralCard({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final habilitado = onTap != null;
+
+    return Material(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        mouseCursor: habilitado
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.basic,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: AppTheme.orange.withValues(alpha: habilitado ? 0.4 : 0.15),
+            ),
+            color: AppTheme.orange.withValues(alpha: 0.05),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.orange.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.summarize_rounded,
+                  color: AppTheme.orange,
+                  size: 20,
                 ),
               ),
-            );
-          },
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Relatório geral',
+                      style: GoogleFonts.raleway(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: habilitado
+                            ? scheme.onSurface
+                            : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Gera um PDF único com o relatório de penalidades de todos os colaboradores',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: habilitado ? AppTheme.orange : scheme.onSurfaceVariant,
+              ),
+            ],
+          ),
         ),
       ),
     );

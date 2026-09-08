@@ -7,16 +7,45 @@ class LancamentoBonusResponse {
   final bool success;
   final String? message;
   final int? pontosAtual;
+  final double? percentualAtual;
+  final double? faixaPercentual;
+  final double? valorBonus;
   final LancamentoBonus? lancamento;
   final List<LancamentoBonus>? lista;
+  final List<ResumoMotivo>? resumoMotivos;
 
   LancamentoBonusResponse({
     required this.success,
     this.message,
     this.pontosAtual,
+    this.percentualAtual,
+    this.faixaPercentual,
+    this.valorBonus,
     this.lancamento,
     this.lista,
+    this.resumoMotivos,
   });
+}
+
+/// Contagem de penalidades lançadas para um motivo em um mês/ano.
+class ResumoMotivo {
+  final int motivoId;
+  final String motivoNome;
+  final int total;
+
+  ResumoMotivo({
+    required this.motivoId,
+    required this.motivoNome,
+    required this.total,
+  });
+
+  factory ResumoMotivo.fromJson(Map<String, dynamic> json) {
+    return ResumoMotivo(
+      motivoId: json['motivo_id'] as int,
+      motivoNome: json['motivo_nome'] as String? ?? '',
+      total: json['total'] as int,
+    );
+  }
 }
 
 class LancamentoBonusService {
@@ -55,6 +84,9 @@ class LancamentoBonusService {
         return LancamentoBonusResponse(
           success: true,
           pontosAtual: pontuacao['pontos_atual'] as int,
+          percentualAtual: (pontuacao['percentual_atual'] as num?)?.toDouble(),
+          faixaPercentual: (pontuacao['faixa_percentual'] as num?)?.toDouble(),
+          valorBonus: (pontuacao['valor_bonus'] as num?)?.toDouble(),
         );
       }
       return LancamentoBonusResponse(
@@ -65,7 +97,7 @@ class LancamentoBonusService {
       developer.log('[LancamentoBonusService.buscarPontuacao] ERRO: $e\n$st');
       return LancamentoBonusResponse(
         success: false,
-        message: 'Não foi possível conectar ao servidor. ($e)',
+        message: 'Não foi possível conectar ao servidor. Verifique sua internet.',
       );
     }
   }
@@ -106,19 +138,74 @@ class LancamentoBonusService {
       developer.log('[LancamentoBonusService.buscarHistorico] ERRO: $e\n$st');
       return LancamentoBonusResponse(
         success: false,
-        message: 'Não foi possível conectar ao servidor. ($e)',
+        message: 'Não foi possível conectar ao servidor. Verifique sua internet.',
+      );
+    }
+  }
+
+  /// Contagem de penalidades por motivo, num mês/ano. Se [colaboradorIds]
+  /// for informado, restringe a esses colaboradores (usado no relatório
+  /// geral); se omitido, soma de todos.
+  Future<LancamentoBonusResponse> buscarResumoMotivos({
+    required String token,
+    required int mes,
+    required int ano,
+    List<int>? colaboradorIds,
+  }) async {
+    try {
+      final query = {
+        'recurso': 'resumo_motivos',
+        'mes': '$mes',
+        'ano': '$ano',
+        if (colaboradorIds != null && colaboradorIds.isNotEmpty)
+          'colaborador_ids': colaboradorIds.join(','),
+      };
+      final uri = Uri.parse('$_base/lancamentos_bonus.php')
+          .replace(queryParameters: query);
+
+      final res =
+          await http.get(uri, headers: _headers(token)).timeout(const Duration(seconds: 15));
+      developer.log('[LancamentoBonusService.buscarResumoMotivos] status=${res.statusCode} body=${res.body}');
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+
+      if (res.statusCode == 200 && data['success'] == true) {
+        final resumo = (data['resumo'] as List)
+            .map((e) => ResumoMotivo.fromJson(e as Map<String, dynamic>))
+            .toList();
+        return LancamentoBonusResponse(success: true, resumoMotivos: resumo);
+      }
+      return LancamentoBonusResponse(
+        success: false,
+        message: data['message'] as String? ?? 'Erro ao carregar resumo de motivos',
+      );
+    } catch (e, st) {
+      developer.log('[LancamentoBonusService.buscarResumoMotivos] ERRO: $e\n$st');
+      return LancamentoBonusResponse(
+        success: false,
+        message: 'Não foi possível conectar ao servidor. Verifique sua internet.',
       );
     }
   }
 
   /// Lança uma nova penalidade para o colaborador.
+  ///
+  /// Informe [subcategoriaId] para uma penalidade vinculada ao catálogo
+  /// de categorias/subcategorias (os pontos são deduzidos no backend a
+  /// partir da subcategoria). Para uma penalidade AVULSA (sem categoria
+  /// do catálogo), omita [subcategoriaId] e informe [pontos] diretamente.
   Future<LancamentoBonusResponse> lancar({
     required String token,
     required int colaboradorId,
-    required int subcategoriaId,
+    int? subcategoriaId,
+    int? pontos,
+    required int motivoId,
     required String observacao,
     required String os,
   }) async {
+    assert(
+      subcategoriaId != null || pontos != null,
+      'Informe subcategoriaId (catálogo) ou pontos (penalidade avulsa)',
+    );
     try {
       final res = await http
           .post(
@@ -126,7 +213,9 @@ class LancamentoBonusService {
             headers: _headers(token),
             body: jsonEncode({
               'colaborador_id': colaboradorId,
-              'subcategoria_id': subcategoriaId,
+              if (subcategoriaId != null) 'subcategoria_id': subcategoriaId,
+              if (pontos != null) 'pontos': pontos,
+              'motivo_id': motivoId,
               'observacao': observacao,
               'os': os,
             }),
@@ -141,6 +230,9 @@ class LancamentoBonusService {
           lancamento:
               LancamentoBonus.fromJson(data['lancamento'] as Map<String, dynamic>),
           pontosAtual: data['pontos_atual'] as int,
+          percentualAtual: (data['percentual_atual'] as num?)?.toDouble(),
+          faixaPercentual: (data['faixa_percentual'] as num?)?.toDouble(),
+          valorBonus: (data['valor_bonus'] as num?)?.toDouble(),
         );
       }
       return LancamentoBonusResponse(
@@ -151,7 +243,7 @@ class LancamentoBonusService {
       developer.log('[LancamentoBonusService.lancar] ERRO: $e\n$st');
       return LancamentoBonusResponse(
         success: false,
-        message: 'Não foi possível conectar ao servidor. ($e)',
+        message: 'Não foi possível conectar ao servidor. Verifique sua internet.',
       );
     }
   }
@@ -175,6 +267,9 @@ class LancamentoBonusService {
         return LancamentoBonusResponse(
           success: true,
           pontosAtual: data['pontos_atual'] as int,
+          percentualAtual: (data['percentual_atual'] as num?)?.toDouble(),
+          faixaPercentual: (data['faixa_percentual'] as num?)?.toDouble(),
+          valorBonus: (data['valor_bonus'] as num?)?.toDouble(),
         );
       }
       return LancamentoBonusResponse(
@@ -185,7 +280,7 @@ class LancamentoBonusService {
       developer.log('[LancamentoBonusService.desfazer] ERRO: $e\n$st');
       return LancamentoBonusResponse(
         success: false,
-        message: 'Não foi possível conectar ao servidor. ($e)',
+        message: 'Não foi possível conectar ao servidor. Verifique sua internet.',
       );
     }
   }

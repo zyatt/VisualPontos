@@ -66,6 +66,13 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
   String? _erro;
   String? _sucesso;
 
+  /// GERENTE não pode editar/excluir um usuário ADMIN.
+  bool get _bloqueadoPorPermissao {
+    if (!widget.isEdicao) return false;
+    final meuRole = context.read<UsuarioProvider>().usuario?.role;
+    return meuRole == 'GERENTE' && widget.usuarioParaEditar!.role == 'ADMIN';
+  }
+
   @override
   void dispose() {
     _nomeCtrl.dispose();
@@ -79,6 +86,13 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
   }
 
   Future<void> _salvar() async {
+    if (_bloqueadoPorPermissao) {
+      setState(() {
+        _erro = 'Você não tem permissão para editar um administrador';
+      });
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -148,6 +162,17 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
 
     final meuId = context.read<UsuarioProvider>().usuario?.id;
 
+    // Segurança: um GERENTE não pode excluir um ADMIN.
+    if (_bloqueadoPorPermissao) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Você não tem permissão para excluir um administrador'),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+      return;
+    }
+
     // Segurança: o próprio usuário logado nunca pode ser excluído.
     if (usuario.id == meuId) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -168,16 +193,27 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
           'Esta ação não pode ser desfeita.',
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.error,
+          Tooltip(
+            message: 'Cancelar',
+            child: TextButton(
+              style: ButtonStyle(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancelar'),
             ),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Excluir'),
+          ),
+          Tooltip(
+            message: 'Excluir usuário',
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.error,
+              ).copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Excluir'),
+            ),
           ),
         ],
       ),
@@ -226,9 +262,15 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(isEdicao ? 'Editar usuário' : 'Cadastrar usuário'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
+        leading: Tooltip(
+          message: 'Voltar',
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => context.pop(),
+            style: ButtonStyle(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+          ),
         ),
       ),
       body: Center(
@@ -287,6 +329,31 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
                     ),
                     const SizedBox(height: 28),
 
+                    if (_bloqueadoPorPermissao) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.error.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppTheme.error.withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.lock_outline_rounded, color: AppTheme.error, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Como gerente, você não tem permissão para editar um administrador.',
+                                style: GoogleFonts.nunito(color: AppTheme.error, fontSize: 13),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+
                     if (_erro != null) ...[
                       Container(
                         width: double.infinity,
@@ -339,6 +406,7 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
 
                    TextFormField(
                     controller: _nomeCtrl,
+                    enabled: !_bloqueadoPorPermissao,
                     decoration: const InputDecoration(
                       labelText: 'Nome',
                       prefixIcon: Icon(Icons.badge_outlined, size: 18),
@@ -358,6 +426,7 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
                     TextFormField(
                       controller: _userCtrl,
                       focusNode: _userFocus,
+                      enabled: !_bloqueadoPorPermissao,
                       decoration: const InputDecoration(
                         labelText: 'Usuário',
                         prefixIcon: Icon(Icons.person_outline_rounded, size: 18),
@@ -375,25 +444,17 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
                     ),
                     const SizedBox(height: 14),
 
-                    DropdownButtonFormField<String>(
-                      initialValue: _role,
-                      decoration: const InputDecoration(
-                        labelText: 'Perfil',
-                        prefixIcon: Icon(Icons.shield_outlined, size: 18),
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: 'ADMIN', child: Text('Administrador')),
-                        DropdownMenuItem(value: 'GERENTE', child: Text('Gerente')),
-                        //DropdownMenuItem(value: 'COMPRADOR', child: Text('Comprador')),
-                        //DropdownMenuItem(value: 'PRODUCAO', child: Text('Produção')),
-                      ],
-                      onChanged: (v) => setState(() => _role = v ?? _role),
+                    _PerfilSelector(
+                      value: _role,
+                      enabled: !_bloqueadoPorPermissao,
+                      onChanged: (v) => setState(() => _role = v),
                     ),
                     const SizedBox(height: 14),
 
                     TextFormField(
                       controller: _senhaCtrl,
                       focusNode: _senhaFocus,
+                      enabled: !_bloqueadoPorPermissao,
                       obscureText: _obscureSenha,
                       textInputAction: TextInputAction.next,
                       onFieldSubmitted: (_) => FocusScope.of(context).requestFocus(_confirmarSenhaFocus),
@@ -425,6 +486,7 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
                     TextFormField(
                       controller: _confirmarSenhaCtrl,
                       focusNode: _confirmarSenhaFocus,
+                      enabled: !_bloqueadoPorPermissao,
                       obscureText: _obscureConfirmar,
                       textInputAction: TextInputAction.done,
                       onFieldSubmitted: (_) => _carregando ? null : _salvar(),
@@ -458,7 +520,7 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
                           width: double.infinity,
                           height: 48,
                           child: ElevatedButton(
-                            onPressed: _carregando ? null : _salvar,
+                            onPressed: (_carregando || _bloqueadoPorPermissao) ? null : _salvar,
                             style: ButtonStyle(
                               mouseCursor: WidgetStateProperty.all(
                                 SystemMouseCursors.click,
@@ -491,12 +553,13 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
                               final meuId = context.read<UsuarioProvider>().usuario?.id;
                               final ehVoceMesmo =
                                   widget.usuarioParaEditar!.id == meuId;
+                              final semPermissao = _bloqueadoPorPermissao;
 
                               return SizedBox(
                                 width: double.infinity,
                                 height: 44,
                                 child: OutlinedButton.icon(
-                                  onPressed: (_carregando || ehVoceMesmo)
+                                  onPressed: (_carregando || ehVoceMesmo || semPermissao)
                                       ? null
                                       : _excluir,
                                   icon: const Icon(
@@ -506,7 +569,9 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
                                   label: Text(
                                     ehVoceMesmo
                                         ? 'Não é possível excluir seu usuário'
-                                        : 'Excluir usuário',
+                                        : semPermissao
+                                            ? 'Sem permissão para excluir'
+                                            : 'Excluir usuário',
                                     style: GoogleFonts.nunito(
                                       fontWeight: FontWeight.w700,
                                       fontSize: 14,
@@ -554,6 +619,105 @@ class _CadastroUsuarioPageState extends State<CadastroUsuarioPage> {
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Campo de seleção de "Perfil" com a mesma aparência de um
+/// DropdownButtonFormField, porém com controle total sobre o cursor:
+/// usa InkWell (que suporta mouseCursor nativamente) para abrir o menu,
+/// então o botão inteiro e cada item da lista mostram o cursor de mão.
+class _PerfilSelector extends StatefulWidget {
+  final String value;
+  final bool enabled;
+  final ValueChanged<String> onChanged;
+
+  const _PerfilSelector({
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  @override
+  State<_PerfilSelector> createState() => _PerfilSelectorState();
+}
+
+class _PerfilSelectorState extends State<_PerfilSelector> {
+  static const _opcoes = [
+    ('ADMIN', 'Administrador'),
+    ('GERENTE', 'Gerente'),
+  ];
+
+  final _fieldKey = GlobalKey();
+
+  String get _label => _opcoes
+      .firstWhere((o) => o.$1 == widget.value, orElse: () => _opcoes.first)
+      .$2;
+
+  Future<void> _abrirMenu() async {
+    final box = _fieldKey.currentContext!.findRenderObject() as RenderBox;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final topLeft = box.localToGlobal(Offset(0, box.size.height + 4), ancestor: overlay);
+    final bottomRight = box.localToGlobal(
+      Offset(box.size.width, box.size.height + 4),
+      ancestor: overlay,
+    );
+
+    final selecionado = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromPoints(topLeft, bottomRight),
+        Offset.zero & overlay.size,
+      ),
+      constraints: BoxConstraints(minWidth: box.size.width),
+      items: _opcoes
+          .map(
+            (o) => PopupMenuItem<String>(
+              value: o.$1,
+              mouseCursor: SystemMouseCursors.click,
+              child: Text(o.$2),
+            ),
+          )
+          .toList(),
+    );
+
+    if (selecionado != null) widget.onChanged(selecionado);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return InkWell(
+      key: _fieldKey,
+      mouseCursor: widget.enabled
+          ? SystemMouseCursors.click
+          : SystemMouseCursors.basic,
+      borderRadius: BorderRadius.circular(12),
+      onTap: widget.enabled ? _abrirMenu : null,
+      child: InputDecorator(
+        isEmpty: false,
+        decoration: InputDecoration(
+          labelText: 'Perfil',
+          prefixIcon: const Icon(Icons.shield_outlined, size: 18),
+          suffixIcon: Icon(
+            Icons.arrow_drop_down_rounded,
+            color: widget.enabled
+                ? scheme.onSurfaceVariant
+                : scheme.onSurfaceVariant.withValues(alpha: 0.5),
+          ),
+          enabled: widget.enabled,
+        ),
+        child: Text(
+          _label,
+          style: TextStyle(
+            color: widget.enabled
+                ? scheme.onSurface
+                : scheme.onSurface.withValues(alpha: 0.5),
           ),
         ),
       ),

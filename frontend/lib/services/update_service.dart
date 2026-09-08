@@ -101,7 +101,17 @@ class UpdateService {
         };
       } else if (data.containsKey('latestVersion')) {
         _log('Formato detectado: JSON customizado');
-        updateData = data;
+
+        final downloadUrl = Platform.isAndroid
+            ? (data['downloadUrlAndroid'] ?? data['downloadUrl'] ?? '')
+            : (data['downloadUrlWindows'] ?? data['downloadUrl'] ?? '');
+
+        updateData = {
+          'latestVersion': data['latestVersion'],
+          'downloadUrl': downloadUrl,
+          'releaseNotes': data['releaseNotes'] ?? '',
+          'mandatory': data['mandatory'] ?? false,
+        };
       } else {
         _log('ERRO: Formato desconhecido. Chaves: ${data.keys.toList()}');
         return null;
@@ -193,6 +203,29 @@ class UpdateService {
       return 'Arquivo não encontrado após gravação:\n$destPath';
     }
 
+    // Valida se o conteúdo é realmente um executável PE (Windows .exe)
+    // ou um APK (arquivo ZIP), e não uma página HTML/JSON de erro que
+    // às vezes vem com status 200 (ex: página de erro de CDN/proxy).
+    if (destPath.toLowerCase().endsWith('.exe')) {
+      final header = bytes.length >= 2 ? bytes.sublist(0, 2) : <int>[];
+      // Arquivos PE começam com "MZ" (0x4D 0x5A)
+      if (header.length < 2 || header[0] != 0x4D || header[1] != 0x5A) {
+        await file.delete();
+        return 'O arquivo baixado não é um instalador válido (.exe).\n'
+            'Isso geralmente indica que a URL de download retornou uma '
+            'página de erro em vez do arquivo. Verifique a URL:\n$downloadUrl';
+      }
+    } else if (destPath.toLowerCase().endsWith('.apk')) {
+      final header = bytes.length >= 4 ? bytes.sublist(0, 4) : <int>[];
+      // APKs são ZIP: começam com "PK" (0x50 0x4B)
+      if (header.length < 2 || header[0] != 0x50 || header[1] != 0x4B) {
+        await file.delete();
+        return 'O arquivo baixado não é um APK válido.\n'
+            'Isso geralmente indica que a URL de download retornou uma '
+            'página de erro em vez do arquivo. Verifique a URL:\n$downloadUrl';
+      }
+    }
+
     return null;
   }
 
@@ -208,6 +241,9 @@ class UpdateService {
 
       final erroDownload = await _downloadFile(downloadUrl, installerPath, onProgress);
       if (erroDownload != null) return erroDownload;
+
+      final tamanho = await File(installerPath).length();
+      _log('Instalador baixado: $tamanho bytes em $installerPath');
 
       await Future.delayed(const Duration(milliseconds: 800));
 

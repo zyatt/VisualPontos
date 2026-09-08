@@ -7,7 +7,9 @@ import '../models/colaborador.dart';
 import '../models/lancamento_bonus.dart';
 import '../providers/lancamento_bonus_provider.dart';
 import '../providers/usuario_provider.dart';
+import '../services/lancamento_bonus_service.dart' show ResumoMotivo;
 import '../theme/app_theme.dart';
+import '../utils/relatorio_penalidades_pdf.dart';
 
 const int _kPontosIniciaisMes = 100;
 
@@ -16,7 +18,23 @@ const int _kPontosIniciaisMes = 100;
 class HistoricoPenalidadesPage extends StatefulWidget {
   final Colaborador colaborador;
 
-  const HistoricoPenalidadesPage({super.key, required this.colaborador});
+  /// Quando informados (junto com [mesInicial]), a tela abre direto no
+  /// nível de lançamentos daquele mês/ano, pulando a navegação por
+  /// ano -> mês. Usado ao vir da Visão Geral, clicando numa penalidade.
+  final int? anoInicial;
+  final int? mesInicial;
+
+  /// Id do lançamento a destacar visualmente ao abrir (também usado
+  /// para rolar até ele), quando se navega direto para um mês.
+  final int? lancamentoDestacadoId;
+
+  const HistoricoPenalidadesPage({
+    super.key,
+    required this.colaborador,
+    this.anoInicial,
+    this.mesInicial,
+    this.lancamentoDestacadoId,
+  });
 
   @override
   State<HistoricoPenalidadesPage> createState() =>
@@ -26,14 +44,45 @@ class HistoricoPenalidadesPage extends StatefulWidget {
 enum _Nivel { anos, meses, lancamentos }
 
 class _HistoricoPenalidadesPageState extends State<HistoricoPenalidadesPage> {
-  _Nivel _nivel = _Nivel.anos;
-  int? _anoSelecionado;
-  int? _mesSelecionado;
+  late _Nivel _nivel;
+  late int? _anoSelecionado;
+  late int? _mesSelecionado;
+  int? _lancamentoDestacadoId;
+
+  final _lancamentoDestacadoKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _carregar());
+
+    final temAlvoDireto =
+        widget.anoInicial != null && widget.mesInicial != null;
+
+    _nivel = temAlvoDireto ? _Nivel.lancamentos : _Nivel.anos;
+    _anoSelecionado = widget.anoInicial;
+    _mesSelecionado = widget.mesInicial;
+    _lancamentoDestacadoId = widget.lancamentoDestacadoId;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _carregar();
+      _rolarParaDestacado();
+    });
+  }
+
+  void _rolarParaDestacado() {
+    if (_lancamentoDestacadoId == null || !mounted) return;
+    // Aguarda o frame ser desenhado com a lista já carregada.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _lancamentoDestacadoKey.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeInOut,
+          alignment: 0.2,
+        );
+      }
+    });
   }
 
   Future<void> _carregar() async {
@@ -65,18 +114,30 @@ class _HistoricoPenalidadesPageState extends State<HistoricoPenalidadesPage> {
         title: const Text('Desfazer lançamento'),
         content: Text(
           'Deseja desfazer a penalidade de ${lancamento.pontos.abs()} '
-          'pontos em "${lancamento.subcategoriaDesc}"?\n\n'
+          'pontos em "${lancamento.ehAvulsa ? 'Penalidade avulsa' : lancamento.subcategoriaDesc}"?\n\n'
           'Os pontos serão devolvidos ao colaborador.',
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancelar'),
+          Tooltip(
+            message: 'Cancelar',
+            child: TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              style: ButtonStyle(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              child: const Text('Cancelar'),
+            ),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Desfazer'),
+          Tooltip(
+            message: 'Desfazer',
+            child: FilledButton(
+              style: ButtonStyle(
+                backgroundColor: WidgetStateProperty.all(AppTheme.error),
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Desfazer'),
+            ),
           ),
         ],
       ),
@@ -175,6 +236,7 @@ class _HistoricoPenalidadesPageState extends State<HistoricoPenalidadesPage> {
       case _Nivel.lancamentos:
         setState(() {
           _mesSelecionado = null;
+          _lancamentoDestacadoId = null;
           _nivel = _Nivel.meses;
         });
         return false;
@@ -186,6 +248,34 @@ class _HistoricoPenalidadesPageState extends State<HistoricoPenalidadesPage> {
         return false;
       case _Nivel.anos:
         return true;
+    }
+  }
+
+  Future<void> _gerarPdf(_GrupoMes grupo) async {
+    try {
+      final token = context.read<UsuarioProvider>().token;
+      final resumoMotivos = token == null
+          ? const <ResumoMotivo>[]
+          : await context.read<LancamentoBonusProvider>().buscarResumoMotivos(
+                token: token,
+                mes: grupo.mes,
+                ano: grupo.ano,
+                colaboradorIds: [widget.colaborador.id],
+              );
+
+      await gerarRelatorioPenalidadesPdf(
+        colaborador: widget.colaborador,
+        mes: grupo.mes,
+        ano: grupo.ano,
+        lancamentos: grupo.lancamentos,
+        pontosIniciais: _kPontosIniciaisMes,
+        resumoMotivos: resumoMotivos,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Não foi possível gerar o PDF: $e')),
+      );
     }
   }
 
@@ -207,6 +297,19 @@ class _HistoricoPenalidadesPageState extends State<HistoricoPenalidadesPage> {
     final scheme = Theme.of(context).colorScheme;
     final provider = context.watch<LancamentoBonusProvider>();
 
+    // Quando estamos no nível de lançamentos, calcula o grupo do mês
+    // selecionado para poder mostrar o botão de gerar PDF no AppBar.
+    _GrupoMes? grupoAtual;
+    if (_nivel == _Nivel.lancamentos &&
+        !provider.carregando &&
+        provider.historico.isNotEmpty) {
+      final gruposMes = _agruparPorMes(provider.historico);
+      grupoAtual = gruposMes.cast<_GrupoMes?>().firstWhere(
+            (g) => g?.ano == _anoSelecionado && g?.mes == _mesSelecionado,
+            orElse: () => null,
+          );
+    }
+
     return PopScope(
       canPop: _nivel == _Nivel.anos,
       onPopInvokedWithResult: (didPop, _) {
@@ -225,16 +328,40 @@ class _HistoricoPenalidadesPageState extends State<HistoricoPenalidadesPage> {
           ),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_rounded),
+            tooltip: 'Voltar',
+            style: ButtonStyle(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
             onPressed: () {
               if (_voltarNivel()) context.pop();
             },
           ),
+          actions: [
+            if (grupoAtual != null)
+              IconButton(
+                tooltip: 'Gerar PDF do mês',
+                icon: const Icon(Icons.picture_as_pdf_rounded),
+                style: ButtonStyle(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
+                onPressed: () => _gerarPdf(grupoAtual!),
+              ),
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded),
+              tooltip: 'Atualizar',
+              style: ButtonStyle(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              onPressed: provider.carregando ? null : _carregar,
+            ),
+            const SizedBox(width: 4),
+          ],
         ),
         body: RefreshIndicator(
           onRefresh: _carregar,
           child: Builder(
             builder: (context) {
-              if (provider.carregando && provider.historico.isEmpty) {
+              if (provider.carregando) {
                 return const Center(child: CircularProgressIndicator());
               }
 
@@ -268,13 +395,26 @@ class _HistoricoPenalidadesPageState extends State<HistoricoPenalidadesPage> {
                   return _ListaMeses(meses: meses, onTap: _abrirMes);
 
                 case _Nivel.lancamentos:
-                  final grupo = gruposMes.firstWhere(
-                    (g) => g.ano == _anoSelecionado && g.mes == _mesSelecionado,
-                  );
+                  final grupo = gruposMes.cast<_GrupoMes?>().firstWhere(
+                        (g) =>
+                            g?.ano == _anoSelecionado &&
+                            g?.mes == _mesSelecionado,
+                        orElse: () => null,
+                      );
+
+                  if (grupo == null) {
+                    return const _EstadoVazio(
+                      icon: Icons.history_toggle_off_rounded,
+                      mensagem: 'Nenhuma penalidade encontrada para este mês.',
+                    );
+                  }
+
                   return _ListaLancamentos(
                     lancamentos: grupo.lancamentos,
                     onDesfazer: _desfazer,
                     podeDesfazer: _podeDesfazer,
+                    lancamentoDestacadoId: _lancamentoDestacadoId,
+                    lancamentoDestacadoKey: _lancamentoDestacadoKey,
                   );
               }
             },
@@ -485,11 +625,15 @@ class _ListaLancamentos extends StatelessWidget {
   final List<LancamentoBonus> lancamentos;
   final ValueChanged<LancamentoBonus> onDesfazer;
   final bool podeDesfazer;
+  final int? lancamentoDestacadoId;
+  final Key? lancamentoDestacadoKey;
 
   const _ListaLancamentos({
     required this.lancamentos,
     required this.onDesfazer,
     required this.podeDesfazer,
+    this.lancamentoDestacadoId,
+    this.lancamentoDestacadoKey,
   });
 
   @override
@@ -503,10 +647,13 @@ class _ListaLancamentos extends StatelessWidget {
           separatorBuilder: (_, __) => const SizedBox(height: 10),
           itemBuilder: (context, index) {
             final lancamento = lancamentos[index];
+            final destacado = lancamento.id == lancamentoDestacadoId;
             return _LancamentoTile(
+              key: destacado ? lancamentoDestacadoKey : null,
               lancamento: lancamento,
               onDesfazer: () => onDesfazer(lancamento),
               podeDesfazer: podeDesfazer,
+              destacado: destacado,
             );
           },
         ),
@@ -519,11 +666,14 @@ class _LancamentoTile extends StatelessWidget {
   final LancamentoBonus lancamento;
   final VoidCallback onDesfazer;
   final bool podeDesfazer;
+  final bool destacado;
 
   const _LancamentoTile({
+    super.key,
     required this.lancamento,
     required this.onDesfazer,
     required this.podeDesfazer,
+    this.destacado = false,
   });
 
   @override
@@ -532,12 +682,20 @@ class _LancamentoTile extends StatelessWidget {
     final dataFormatada =
         DateFormat('dd/MM/yyyy HH:mm').format(lancamento.criadoEm);
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 400),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: scheme.surface,
+        color: destacado
+            ? AppTheme.orange.withValues(alpha: 0.08)
+            : scheme.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: scheme.outline.withValues(alpha: 0.5)),
+        border: Border.all(
+          color: destacado
+              ? AppTheme.orange.withValues(alpha: 0.6)
+              : scheme.outline.withValues(alpha: 0.5),
+          width: destacado ? 1.5 : 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -550,7 +708,9 @@ class _LancamentoTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${lancamento.categoriaNome} · ${lancamento.subcategoriaDesc}',
+                      lancamento.ehAvulsa
+                          ? 'Penalidade avulsa'
+                          : '${lancamento.categoriaNome} · ${lancamento.subcategoriaDesc}',
                       style: GoogleFonts.raleway(
                         fontWeight: FontWeight.w700,
                         fontSize: 14,
@@ -586,6 +746,11 @@ class _LancamentoTile extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
+          if (lancamento.motivoNome != null &&
+              lancamento.motivoNome!.isNotEmpty) ...[
+            _InfoLinha(rotulo: 'Motivo', valor: lancamento.motivoNome!),
+            const SizedBox(height: 6),
+          ],
           _InfoLinha(rotulo: 'OS', valor: lancamento.os),
           const SizedBox(height: 6),
           _InfoLinha(rotulo: 'Observação', valor: lancamento.observacao),
@@ -595,11 +760,17 @@ class _LancamentoTile extends StatelessWidget {
             const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: onDesfazer,
-                icon: const Icon(Icons.undo_rounded, size: 16),
-                label: const Text('Desfazer'),
-                style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+              child: Tooltip(
+                message: 'Desfazer',
+                child: TextButton.icon(
+                  onPressed: onDesfazer,
+                  icon: const Icon(Icons.undo_rounded, size: 16),
+                  label: const Text('Desfazer'),
+                  style: ButtonStyle(
+                    foregroundColor: WidgetStateProperty.all(AppTheme.error),
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                  ),
+                ),
               ),
             ),
           ],

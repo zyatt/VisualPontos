@@ -12,11 +12,14 @@ import 'providers/usuario_admin_provider.dart';
 import 'providers/colaborador_provider.dart';
 import 'providers/bonus_provider.dart';
 import 'providers/lancamento_bonus_provider.dart';
+import 'providers/motivo_bonus_provider.dart';
+import 'providers/visao_geral_provider.dart';
 import 'theme/app_theme.dart';
 import 'widgets/theme_transition.dart';
 import 'widgets/update_checker_widget.dart';
 import 'pages/login_page.dart';
 import 'pages/inicio_page.dart';
+import 'pages/visao_geral_page.dart';
 import 'pages/cadastro_usuario_page.dart';
 import 'pages/cadastro_colaborador_page.dart';
 import 'pages/colaboradores_page.dart';
@@ -25,6 +28,7 @@ import 'pages/historico_penalidades_page.dart';
 import 'pages/usuarios_page.dart';
 import 'pages/bonus_page.dart';
 import 'pages/detalhe_bonus_page.dart';
+import 'pages/motivos_bonus_page.dart';
 import 'models/colaborador.dart';
 import 'models/usuario.dart';
 import 'models/bonus.dart';
@@ -74,6 +78,8 @@ class VisualPremiumApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ColaboradorProvider()),
         ChangeNotifierProvider(create: (_) => BonusProvider()),
         ChangeNotifierProvider(create: (_) => LancamentoBonusProvider()),
+        ChangeNotifierProvider(create: (_) => MotivoBonusProvider()),
+        ChangeNotifierProvider(create: (_) => VisaoGeralProvider()),
       ],
       child: const _AppRoot(),
     );
@@ -129,6 +135,10 @@ class _AppRootState extends State<_AppRoot> {
           path: '/inicio',
           builder: (context, state) => const InicioPage(),
         ),
+        GoRoute(
+          path: '/visao-geral',
+          builder: (context, state) => const VisaoGeralPage(),
+        ),
 
         // ── Usuários ────────────────────────────────────────────────────
         GoRoute(
@@ -169,9 +179,20 @@ class _AppRootState extends State<_AppRoot> {
         ),
         GoRoute(
           path: '/colaboradores/historico',
-          builder: (context, state) => HistoricoPenalidadesPage(
-            colaborador: state.extra as Colaborador,
-          ),
+          builder: (context, state) {
+            final extra = state.extra;
+            if (extra is HistoricoPenalidadesArgs) {
+              return HistoricoPenalidadesPage(
+                colaborador: extra.colaborador,
+                anoInicial: extra.ano,
+                mesInicial: extra.mes,
+                lancamentoDestacadoId: extra.lancamentoId,
+              );
+            }
+            return HistoricoPenalidadesPage(
+              colaborador: extra as Colaborador,
+            );
+          },
         ),
 
         // ── Bônus ───────────────────────────────────────────────────────
@@ -184,6 +205,12 @@ class _AppRootState extends State<_AppRoot> {
           builder: (context, state) => DetalheBonusPage(
             bonus: state.extra as Bonus,
           ),
+        ),
+
+        // ── Motivos ─────────────────────────────────────────────────────
+        GoRoute(
+          path: '/motivos',
+          builder: (context, state) => const MotivosBonusPage(),
         ),
       ],
     );

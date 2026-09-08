@@ -205,16 +205,27 @@ class _CadastroColaboradorPageState extends State<CadastroColaboradorPage> {
           'Esta ação não pode ser desfeita.',
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.error,
+          Tooltip(
+            message: 'Cancelar',
+            child: TextButton(
+              style: ButtonStyle(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancelar'),
             ),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Excluir'),
+          ),
+          Tooltip(
+            message: 'Excluir colaborador',
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.error,
+              ).copyWith(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Excluir'),
+            ),
           ),
         ],
       ),
@@ -265,6 +276,10 @@ class _CadastroColaboradorPageState extends State<CadastroColaboradorPage> {
         title: Text(isEdicao ? 'Editar colaborador' : 'Cadastrar colaborador'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
+          tooltip: 'Voltar',
+          style: ButtonStyle(
+            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+          ),
           onPressed: () => context.pop(),
         ),
       ),
@@ -599,6 +614,10 @@ class _SeletorBonusSheet extends StatelessWidget {
                     ),
                     IconButton(
                       icon: const Icon(Icons.close_rounded),
+                      tooltip: 'Fechar',
+                      style: ButtonStyle(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
                       onPressed: () => Navigator.of(context).pop(),
                     ),
                   ],

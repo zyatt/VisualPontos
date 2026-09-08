@@ -6,6 +6,7 @@ import '../models/categoria_bonus.dart';
 import '../models/subcategoria_bonus.dart';
 import '../models/observacao_bonus.dart';
 import '../models/item_observacao_bonus.dart';
+import '../models/faixa_bonus.dart';
 
 class BonusResponse {
   final bool success;
@@ -16,6 +17,8 @@ class BonusResponse {
   final SubcategoriaBonus? subcategoria;
   final ObservacaoBonus? observacao;
   final ItemObservacaoBonus? item;
+  final FaixaBonus? faixa;
+  final List<FaixaBonus>? faixas;
 
   BonusResponse({
     required this.success,
@@ -26,6 +29,8 @@ class BonusResponse {
     this.subcategoria,
     this.observacao,
     this.item,
+    this.faixa,
+    this.faixas,
   });
 }
 
@@ -60,7 +65,7 @@ class BonusService {
       developer.log('[BonusService.listar] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -84,7 +89,7 @@ class BonusService {
       developer.log('[BonusService.buscar] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -110,7 +115,7 @@ class BonusService {
       developer.log('[BonusService.criar] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -136,7 +141,7 @@ class BonusService {
       developer.log('[BonusService.editarBonus] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -159,7 +164,7 @@ class BonusService {
       developer.log('[BonusService.excluirBonus] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -188,7 +193,7 @@ class BonusService {
       developer.log('[BonusService.duplicar] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -220,7 +225,7 @@ class BonusService {
       developer.log('[BonusService.criarCategoria] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -250,7 +255,7 @@ class BonusService {
       developer.log('[BonusService.editarCategoria] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -275,7 +280,7 @@ class BonusService {
       developer.log('[BonusService.excluirCategoria] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -312,7 +317,7 @@ class BonusService {
       developer.log('[BonusService.criarSubcategoria] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -344,7 +349,7 @@ class BonusService {
       developer.log('[BonusService.editarSubcategoria] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -369,7 +374,7 @@ class BonusService {
       developer.log('[BonusService.excluirSubcategoria] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -401,7 +406,7 @@ class BonusService {
       developer.log('[BonusService.criarObservacao] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -431,7 +436,7 @@ class BonusService {
       developer.log('[BonusService.editarObservacao] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -456,7 +461,7 @@ class BonusService {
       developer.log('[BonusService.excluirObservacao] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -490,7 +495,7 @@ class BonusService {
       developer.log('[BonusService.criarItemObservacao] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -521,7 +526,7 @@ class BonusService {
       developer.log('[BonusService.editarItemObservacao] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 
@@ -548,7 +553,102 @@ class BonusService {
       developer.log('[BonusService.excluirItemObservacao] ERRO: $e\n$st');
       return BonusResponse(
           success: false,
-          message: 'Não foi possível conectar ao servidor. ($e)');
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
+    }
+  }
+
+  // ─── FAIXA DE BÔNUS ─────────────────────────────────────────────────────
+
+  Future<BonusResponse> criarFaixa({
+    required String token,
+    required int bonusId,
+    required int pontos,
+    required double valor,
+  }) async {
+    try {
+      final res = await http
+          .post(Uri.parse('$_base/bonus.php?recurso=faixa'),
+              headers: _headers(token),
+              body: jsonEncode({
+                'bonus_id': bonusId,
+                'pontos': pontos,
+                'valor': valor,
+              }))
+          .timeout(const Duration(seconds: 15));
+      developer.log('[BonusService.criarFaixa] status=${res.statusCode} body=${res.body}');
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && data['success'] == true) {
+        return BonusResponse(
+            success: true,
+            faixa: FaixaBonus.fromJson(data['faixa'] as Map<String, dynamic>));
+      }
+      return BonusResponse(
+          success: false,
+          message: data['message'] as String? ?? 'Erro ao criar faixa');
+    } catch (e, st) {
+      developer.log('[BonusService.criarFaixa] ERRO: $e\n$st');
+      return BonusResponse(
+          success: false,
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
+    }
+  }
+
+  Future<BonusResponse> editarFaixa({
+    required String token,
+    required int id,
+    required int pontos,
+    required double valor,
+  }) async {
+    try {
+      final res = await http
+          .put(Uri.parse('$_base/bonus.php?recurso=faixa'),
+              headers: _headers(token),
+              body: jsonEncode({
+                'id': id,
+                'pontos': pontos,
+                'valor': valor,
+              }))
+          .timeout(const Duration(seconds: 15));
+      developer.log('[BonusService.editarFaixa] status=${res.statusCode} body=${res.body}');
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && data['success'] == true) {
+        return BonusResponse(
+            success: true,
+            faixa: FaixaBonus.fromJson(data['faixa'] as Map<String, dynamic>));
+      }
+      return BonusResponse(
+          success: false,
+          message: data['message'] as String? ?? 'Erro ao editar faixa');
+    } catch (e, st) {
+      developer.log('[BonusService.editarFaixa] ERRO: $e\n$st');
+      return BonusResponse(
+          success: false,
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
+    }
+  }
+
+  Future<BonusResponse> excluirFaixa({
+    required String token,
+    required int id,
+  }) async {
+    try {
+      final res = await http
+          .delete(Uri.parse('$_base/bonus.php?recurso=faixa&id=$id'),
+              headers: _headers(token))
+          .timeout(const Duration(seconds: 15));
+      developer.log('[BonusService.excluirFaixa] status=${res.statusCode} body=${res.body}');
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && data['success'] == true) {
+        return BonusResponse(success: true);
+      }
+      return BonusResponse(
+          success: false,
+          message: data['message'] as String? ?? 'Erro ao excluir faixa');
+    } catch (e, st) {
+      developer.log('[BonusService.excluirFaixa] ERRO: $e\n$st');
+      return BonusResponse(
+          success: false,
+          message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
     }
   }
 }

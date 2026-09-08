@@ -513,6 +513,98 @@ class BonusProvider extends ChangeNotifier {
     return res.message ?? 'Não foi possível excluir o item da observação';
   }
 
+  // ─── FAIXA DE BÔNUS ─────────────────────────────────────────────────────
+
+  Future<String?> criarFaixa({
+    required String token,
+    required int bonusId,
+    required int pontos,
+    required double valor,
+  }) async {
+    _carregando = true;
+    notifyListeners();
+
+    final res = await _service.criarFaixa(
+      token: token,
+      bonusId: bonusId,
+      pontos: pontos,
+      valor: valor,
+    );
+    _carregando = false;
+
+    if (res.success && res.faixa != null) {
+      _atualizarBonusLocal(bonusId, (b) {
+        final novasFaixas = [...b.faixas, res.faixa!]
+          ..sort((a, c) => a.pontos.compareTo(c.pontos));
+        return b.copyWith(faixas: novasFaixas);
+      });
+      notifyListeners();
+      return null;
+    }
+
+    notifyListeners();
+    return res.message ?? 'Não foi possível criar a faixa';
+  }
+
+  Future<String?> editarFaixa({
+    required String token,
+    required int bonusId,
+    required int faixaId,
+    required int pontos,
+    required double valor,
+  }) async {
+    _carregando = true;
+    notifyListeners();
+
+    final res = await _service.editarFaixa(
+      token: token,
+      id: faixaId,
+      pontos: pontos,
+      valor: valor,
+    );
+    _carregando = false;
+
+    if (res.success) {
+      _atualizarBonusLocal(bonusId, (b) {
+        final faixas = b.faixas.map((f) {
+          if (f.id != faixaId) return f;
+          return f.copyWith(pontos: pontos, valor: valor);
+        }).toList()
+          ..sort((a, c) => a.pontos.compareTo(c.pontos));
+        return b.copyWith(faixas: faixas);
+      });
+      notifyListeners();
+      return null;
+    }
+
+    notifyListeners();
+    return res.message ?? 'Não foi possível editar a faixa';
+  }
+
+  Future<String?> excluirFaixa({
+    required String token,
+    required int bonusId,
+    required int faixaId,
+  }) async {
+    _carregando = true;
+    notifyListeners();
+
+    final res = await _service.excluirFaixa(token: token, id: faixaId);
+    _carregando = false;
+
+    if (res.success) {
+      _atualizarBonusLocal(bonusId, (b) {
+        final faixas = b.faixas.where((f) => f.id != faixaId).toList();
+        return b.copyWith(faixas: faixas);
+      });
+      notifyListeners();
+      return null;
+    }
+
+    notifyListeners();
+    return res.message ?? 'Não foi possível excluir a faixa';
+  }
+
   // ─── Helper ─────────────────────────────────────────────────────────────
 
   void _atualizarBonusLocal(int bonusId, Bonus Function(Bonus) transform) {

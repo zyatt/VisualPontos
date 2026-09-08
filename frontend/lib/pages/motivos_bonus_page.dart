@@ -3,19 +3,22 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../models/bonus.dart';
-import '../providers/bonus_provider.dart';
+import '../models/motivo_bonus.dart';
+import '../providers/lancamento_bonus_provider.dart';
+import '../providers/motivo_bonus_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/relatorio_penalidades_pdf.dart';
+import '../utils/seletor_mes_ano_relatorio.dart';
 
-class BonusPage extends StatefulWidget {
-  const BonusPage({super.key});
+class MotivosBonusPage extends StatefulWidget {
+  const MotivosBonusPage({super.key});
 
   @override
-  State<BonusPage> createState() => _BonusPageState();
+  State<MotivosBonusPage> createState() => _MotivosBonusPageState();
 }
 
-class _BonusPageState extends State<BonusPage> {
+class _MotivosBonusPageState extends State<MotivosBonusPage> {
   @override
   void initState() {
     super.initState();
@@ -25,20 +28,66 @@ class _BonusPageState extends State<BonusPage> {
   Future<void> _carregar() async {
     final token = context.read<UsuarioProvider>().token;
     if (token == null) return;
-    await context.read<BonusProvider>().carregar(token: token);
+    await context.read<MotivoBonusProvider>().carregar(token: token);
   }
 
-  Future<void> _abrirDetalhe(Bonus bonus) async {
-    await context.push('/bonus/detalhe', extra: bonus);
-    // Recarrega a lista ao voltar (o detalhe pode ter alterado dados)
-    if (mounted) _carregar();
+  /// Abre o seletor de mês/ano e gera um PDF contendo apenas o resumo de
+  /// penalidades por motivo (somando todos os colaboradores) — a mesma
+  /// primeira página do relatório geral, sem as páginas de detalhe por
+  /// colaborador.
+  Future<void> _gerarPdfMotivos() async {
+    final escolha = await selecionarMesAnoRelatorio(
+      context,
+      titulo: 'Relatório de motivos',
+      subtitulo: 'Selecione o mês do resumo de penalidades por motivo',
+    );
+    if (escolha == null || !mounted) return;
+
+    final (mes, ano) = escolha;
+
+    final token = context.read<UsuarioProvider>().token;
+    if (token == null) return;
+
+    final navigator = Navigator.of(context, rootNavigator: true);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      // colaboradorIds omitido: o backend soma penalidades de TODOS os
+      // colaboradores quando a lista não é informada.
+      final resumoMotivos =
+          await context.read<LancamentoBonusProvider>().buscarResumoMotivos(
+                token: token,
+                mes: mes,
+                ano: ano,
+              );
+
+      if (!mounted) return;
+
+      await gerarRelatorioMotivosPdf(
+        mes: mes,
+        ano: ano,
+        resumoMotivos: resumoMotivos,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Não foi possível gerar o PDF: $e')),
+      );
+    } finally {
+      if (navigator.canPop()) navigator.pop();
+    }
   }
 
-  Future<void> _duplicarBonus(Bonus bonus) async {
-    final ctrl = TextEditingController(text: '${bonus.nome} (cópia)');
+  Future<void> _abrirFormulario({MotivoBonus? motivo}) async {
+    final editando = motivo != null;
+    final ctrl = TextEditingController(text: motivo?.nome ?? '');
     final formKey = GlobalKey<FormState>();
 
-    final ok = await showDialog<bool>(
+    final confirmou = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Row(
@@ -50,14 +99,20 @@ class _BonusPageState extends State<BonusPage> {
                 color: AppTheme.orange.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.copy_all_rounded,
-                  color: AppTheme.orange, size: 18),
+              child: Icon(
+                editando ? Icons.edit_rounded : Icons.add_rounded,
+                color: AppTheme.orange,
+                size: 20,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                'Duplicar bônus',
-                style: GoogleFonts.raleway(fontWeight: FontWeight.w700),
+                editando ? 'Editar motivo' : 'Novo motivo',
+                style: GoogleFonts.raleway(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ],
@@ -69,11 +124,9 @@ class _BonusPageState extends State<BonusPage> {
             child: TextFormField(
               controller: ctrl,
               autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'Nome do novo bônus',
-                helperText: 'Categorias e subcategorias de "${bonus.nome}" '
-                    'serão copiadas.',
-                helperMaxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Nome do motivo',
+                prefixIcon: Icon(Icons.label_outline_rounded, size: 18),
               ),
               textCapitalization: TextCapitalization.sentences,
               inputFormatters: [LengthLimitingTextInputFormatter(200)],
@@ -100,7 +153,7 @@ class _BonusPageState extends State<BonusPage> {
             ),
           ),
           Tooltip(
-            message: 'Duplicar',
+            message: editando ? 'Salvar' : 'Criar',
             child: FilledButton(
               style: ButtonStyle(
                 mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
@@ -110,136 +163,7 @@ class _BonusPageState extends State<BonusPage> {
                   Navigator.of(ctx).pop(true);
                 }
               },
-              child: const Text('Duplicar'),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (ok != true || !mounted) return;
-
-    final token = context.read<UsuarioProvider>().token;
-    if (token == null) return;
-
-    final erro = await context.read<BonusProvider>().duplicar(
-          token: token,
-          bonusId: bonus.id,
-          nome: ctrl.text.trim(),
-        );
-
-    if (!mounted) return;
-
-    if (erro != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(erro)));
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bônus duplicado com sucesso')),
-      );
-    }
-  }
-
-  Future<void> _mostrarMenuBonus(Bonus bonus, Offset posicaoGlobal) async {
-    final selecionado = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        posicaoGlobal.dx,
-        posicaoGlobal.dy,
-        posicaoGlobal.dx,
-        posicaoGlobal.dy,
-      ),
-      items: [
-        const PopupMenuItem(
-          value: 'duplicar',
-          child: Row(
-            children: [
-              Icon(Icons.copy_all_outlined, size: 18),
-              SizedBox(width: 10),
-              Text('Duplicar'),
-            ],
-          ),
-        ),
-      ],
-    );
-
-    if (selecionado == 'duplicar' && mounted) {
-      await _duplicarBonus(bonus);
-    }
-  }
-
-  Future<void> _novoBonus() async {
-    final nomeCtrl = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    final confirmou = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: AppTheme.orange.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.add_rounded,
-                  color: AppTheme.orange, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              'Novo bônus',
-              style: GoogleFonts.raleway(
-                  fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
-        content: SizedBox(
-          width: 400,
-          child: Form(
-            key: formKey,
-            child: TextFormField(
-              controller: nomeCtrl,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Nome do bônus',
-                prefixIcon: Icon(Icons.workspace_premium_outlined, size: 18),
-              ),
-              textCapitalization: TextCapitalization.sentences,
-              inputFormatters: [LengthLimitingTextInputFormatter(200)],
-              maxLines: 1,
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Informe o nome' : null,
-              onFieldSubmitted: (_) => Navigator.of(ctx).pop(true),
-            ),
-          ),
-        ),
-        actions: [
-          Tooltip(
-            message: 'Cancelar',
-            child: TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              style: ButtonStyle(
-                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-              ),
-              child: Text('Cancelar',
-                  style: GoogleFonts.raleway(fontWeight: FontWeight.w600)),
-            ),
-          ),
-          Tooltip(
-            message: 'Criar',
-            child: FilledButton(
-              style: ButtonStyle(
-                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-              ),
-              onPressed: () {
-                if (formKey.currentState!.validate()) {
-                  Navigator.of(ctx).pop(true);
-                }
-              },
-              child: Text('Criar',
-                  style: GoogleFonts.nunito(fontWeight: FontWeight.w700)),
+              child: Text(editando ? 'Salvar' : 'Criar'),
             ),
           ),
         ],
@@ -251,9 +175,11 @@ class _BonusPageState extends State<BonusPage> {
     final token = context.read<UsuarioProvider>().token;
     if (token == null) return;
 
-    final erro = await context
-        .read<BonusProvider>()
-        .criar(token: token, nome: nomeCtrl.text.trim());
+    final provider = context.read<MotivoBonusProvider>();
+    final erro = editando
+        ? await provider.editar(
+            token: token, id: motivo.id, nome: ctrl.text.trim())
+        : await provider.criar(token: token, nome: ctrl.text.trim());
 
     if (!mounted) return;
 
@@ -262,19 +188,80 @@ class _BonusPageState extends State<BonusPage> {
           .showSnackBar(SnackBar(content: Text(erro)));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bônus criado com sucesso')),
+        SnackBar(
+          content: Text(
+            editando
+                ? 'Motivo atualizado com sucesso'
+                : 'Motivo criado com sucesso',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _excluir(MotivoBonus motivo) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Excluir motivo'),
+        content: Text(
+          'Deseja excluir o motivo "${motivo.nome}"? '
+          'Penalidades já lançadas com esse motivo manterão o registro.',
+        ),
+        actions: [
+          Tooltip(
+            message: 'Cancelar',
+            child: TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              style: ButtonStyle(
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              child: const Text('Cancelar'),
+            ),
+          ),
+          Tooltip(
+            message: 'Excluir',
+            child: FilledButton(
+              style: ButtonStyle(
+                backgroundColor: WidgetStateProperty.all(AppTheme.error),
+                mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+              ),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Excluir'),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true || !mounted) return;
+
+    final token = context.read<UsuarioProvider>().token;
+    if (token == null) return;
+
+    final erro =
+        await context.read<MotivoBonusProvider>().excluir(token: token, id: motivo.id);
+
+    if (!mounted) return;
+
+    if (erro != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(erro)));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Motivo excluído com sucesso')),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<BonusProvider>();
+    final provider = context.watch<MotivoBonusProvider>();
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'Bônus',
+          'Motivos',
           style: GoogleFonts.raleway(
             fontSize: 14,
             fontWeight: FontWeight.w700,
@@ -290,17 +277,25 @@ class _BonusPageState extends State<BonusPage> {
           onPressed: () => context.pop(),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Gerar PDF do mês',
+            icon: const Icon(Icons.picture_as_pdf_rounded),
+            style: ButtonStyle(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            onPressed: _gerarPdfMotivos,
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Tooltip(
-              message: 'Novo bônus',
+              message: 'Novo motivo',
               child: FilledButton.icon(
-                onPressed: _novoBonus,
+                onPressed: () => _abrirFormulario(),
                 style: ButtonStyle(
                   mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
                 ),
                 icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Novo bônus'),
+                label: const Text('Novo motivo'),
               ),
             ),
           ),
@@ -318,7 +313,7 @@ class _BonusPageState extends State<BonusPage> {
       body: RefreshIndicator(
         onRefresh: _carregar,
         child: Builder(builder: (context) {
-          if (provider.carregando) {
+          if (provider.carregando && provider.lista.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
 
@@ -332,8 +327,8 @@ class _BonusPageState extends State<BonusPage> {
 
           if (provider.lista.isEmpty) {
             return const _EstadoVazio(
-              icon: Icons.workspace_premium_outlined,
-              mensagem: 'Nenhum bônus cadastrado ainda.',
+              icon: Icons.label_outline_rounded,
+              mensagem: 'Nenhum motivo cadastrado ainda.',
             );
           }
 
@@ -345,12 +340,11 @@ class _BonusPageState extends State<BonusPage> {
                 itemCount: provider.lista.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 10),
                 itemBuilder: (context, i) {
-                  final bonus = provider.lista[i];
-                  return _BonusTile(
-                    bonus: bonus,
-                    onTap: () => _abrirDetalhe(bonus),
-                    onLongPressAt: (posicao) =>
-                        _mostrarMenuBonus(bonus, posicao),
+                  final motivo = provider.lista[i];
+                  return _MotivoTile(
+                    motivo: motivo,
+                    onEditar: () => _abrirFormulario(motivo: motivo),
+                    onExcluir: () => _excluir(motivo),
                   );
                 },
               ),
@@ -362,70 +356,69 @@ class _BonusPageState extends State<BonusPage> {
   }
 }
 
-class _BonusTile extends StatelessWidget {
-  final Bonus bonus;
-  final VoidCallback onTap;
-  final void Function(Offset posicaoGlobal) onLongPressAt;
+class _MotivoTile extends StatelessWidget {
+  final MotivoBonus motivo;
+  final VoidCallback onEditar;
+  final VoidCallback onExcluir;
 
-  const _BonusTile({
-    required this.bonus,
-    required this.onTap,
-    required this.onLongPressAt,
+  const _MotivoTile({
+    required this.motivo,
+    required this.onEditar,
+    required this.onExcluir,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    return GestureDetector(
-      onLongPressStart: (details) => onLongPressAt(details.globalPosition),
-      child: Material(
-        color: scheme.surface,
+    return Material(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onEditar,
         borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          mouseCursor: SystemMouseCursors.click,
-          child: Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border:
-                  Border.all(color: scheme.outline.withValues(alpha: 0.5)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: AppTheme.orange.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(Icons.workspace_premium_rounded,
-                      color: AppTheme.orange, size: 20),
+        mouseCursor: SystemMouseCursors.click,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: scheme.outline.withValues(alpha: 0.5)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.orange.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        bonus.nome,
-                        style: GoogleFonts.raleway(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: scheme.onSurface,
-                        ),
-                      ),
-                    ],
+                child: const Icon(Icons.label_rounded,
+                    color: AppTheme.orange, size: 20),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(
+                  motivo.nome,
+                  style: GoogleFonts.raleway(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurface,
                   ),
                 ),
-                Icon(Icons.chevron_right_rounded,
-                    color: scheme.onSurfaceVariant, size: 20),
-              ],
-            ),
+              ),
+              Tooltip(
+                message: 'Excluir',
+                child: IconButton(
+                  icon: Icon(Icons.delete_outline_rounded,
+                      color: scheme.onSurfaceVariant, size: 20),
+                  style: ButtonStyle(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                  ),
+                  onPressed: onExcluir,
+                ),
+              ),
+            ],
           ),
         ),
       ),

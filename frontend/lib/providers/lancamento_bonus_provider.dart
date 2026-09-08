@@ -8,12 +8,20 @@ class LancamentoBonusProvider extends ChangeNotifier {
   bool _carregando = false;
   String? _erro;
   int? _pontosAtual;
+  double? _percentualAtual;
+  double? _faixaPercentual;
+  double? _valorBonus;
   List<LancamentoBonus> _historico = [];
+  final List<ResumoMotivo> _resumoMotivos = [];
 
   bool get carregando => _carregando;
   String? get erro => _erro;
   int? get pontosAtual => _pontosAtual;
+  double? get percentualAtual => _percentualAtual;
+  double? get faixaPercentual => _faixaPercentual;
+  double? get valorBonus => _valorBonus;
   List<LancamentoBonus> get historico => _historico;
+  List<ResumoMotivo> get resumoMotivos => _resumoMotivos;
 
   Future<void> carregarPontuacao({
     required String token,
@@ -31,6 +39,9 @@ class LancamentoBonusProvider extends ChangeNotifier {
     _carregando = false;
     if (res.success) {
       _pontosAtual = res.pontosAtual;
+      _percentualAtual = res.percentualAtual;
+      _faixaPercentual = res.faixaPercentual;
+      _valorBonus = res.valorBonus;
     } else {
       _erro = res.message;
     }
@@ -63,12 +74,37 @@ class LancamentoBonusProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Busca a contagem de penalidades por motivo (usada na 1ª página do
+  /// PDF). Retorna a lista já pronta, sem alterar o estado do provider
+  /// (evita conflito quando o relatório geral chama isso para vários
+  /// colaboradores em sequência).
+  Future<List<ResumoMotivo>> buscarResumoMotivos({
+    required String token,
+    required int mes,
+    required int ano,
+    List<int>? colaboradorIds,
+  }) async {
+    final res = await _service.buscarResumoMotivos(
+      token: token,
+      mes: mes,
+      ano: ano,
+      colaboradorIds: colaboradorIds,
+    );
+    return res.success ? (res.resumoMotivos ?? []) : [];
+  }
+
   /// Lança a penalidade e já atualiza o saldo de pontos local.
   /// Retorna null em caso de sucesso, ou uma mensagem de erro.
+  ///
+  /// Informe [subcategoriaId] para uma penalidade do catálogo de
+  /// categorias/subcategorias, ou [pontos] para uma penalidade AVULSA
+  /// (sem vínculo com o catálogo).
   Future<String?> lancarPenalidade({
     required String token,
     required int colaboradorId,
-    required int subcategoriaId,
+    int? subcategoriaId,
+    int? pontos,
+    required int motivoId,
     required String observacao,
     required String os,
   }) async {
@@ -79,6 +115,8 @@ class LancamentoBonusProvider extends ChangeNotifier {
       token: token,
       colaboradorId: colaboradorId,
       subcategoriaId: subcategoriaId,
+      pontos: pontos,
+      motivoId: motivoId,
       observacao: observacao,
       os: os,
     );
@@ -87,6 +125,9 @@ class LancamentoBonusProvider extends ChangeNotifier {
 
     if (res.success) {
       _pontosAtual = res.pontosAtual;
+      _percentualAtual = res.percentualAtual;
+      _faixaPercentual = res.faixaPercentual;
+      _valorBonus = res.valorBonus;
       if (res.lancamento != null) {
         _historico = [res.lancamento!, ..._historico];
       }
@@ -111,6 +152,9 @@ class LancamentoBonusProvider extends ChangeNotifier {
 
     if (res.success) {
       _pontosAtual = res.pontosAtual;
+      _percentualAtual = res.percentualAtual;
+      _faixaPercentual = res.faixaPercentual;
+      _valorBonus = res.valorBonus;
       _historico = _historico.where((l) => l.id != id).toList();
       notifyListeners();
       return null;

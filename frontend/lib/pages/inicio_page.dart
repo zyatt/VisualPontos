@@ -39,6 +39,7 @@ class InicioPage extends StatelessWidget {
                   // ── Trocar tema ───────────────────────────────────────
                   ListTile(
                     contentPadding: EdgeInsets.zero,
+                    mouseCursor: SystemMouseCursors.click,
                     leading: Icon(
                       themeProvider.isDark
                           ? Icons.light_mode_rounded
@@ -76,6 +77,7 @@ class InicioPage extends StatelessWidget {
                   // ── Sair ──────────────────────────────────────────────
                   ListTile(
                     contentPadding: EdgeInsets.zero,
+                    mouseCursor: SystemMouseCursors.click,
                     leading: Icon(Icons.logout_rounded, color: scheme.error),
                     title: Text(
                       'Sair',
@@ -100,13 +102,21 @@ class InicioPage extends StatelessWidget {
                 ],
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: Text(
-                    'Fechar',
-                    style: GoogleFonts.raleway(
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.orange,
+                Tooltip(
+                  message: 'Fechar',
+                  child: TextButton(
+                    style: ButtonStyle(
+                      mouseCursor: WidgetStateProperty.all(
+                        SystemMouseCursors.click,
+                      ),
+                    ),
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: Text(
+                      'Fechar',
+                      style: GoogleFonts.raleway(
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.orange,
+                      ),
                     ),
                   ),
                 ),
@@ -145,6 +155,11 @@ class InicioPage extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.settings_rounded),
             tooltip: 'Configurações',
+            style: ButtonStyle(
+              mouseCursor: WidgetStateProperty.all(
+                SystemMouseCursors.click,
+              ),
+            ),
             onPressed: () => _showSettingsDialog(context),
           ),
           const SizedBox(width: 8),
@@ -163,6 +178,11 @@ class InicioPage extends StatelessWidget {
 
                   final cards = [
                     _InicioCard(
+                      icon: Icons.dashboard_rounded,
+                      title: 'Visão geral',
+                      onTap: () => context.push('/visao-geral'),
+                    ),
+                    _InicioCard(
                       icon: Icons.groups_2_rounded,
                       title: 'Colaboradores',
                       onTap: () => context.push('/colaboradores'),
@@ -171,6 +191,11 @@ class InicioPage extends StatelessWidget {
                       icon: Icons.workspace_premium_rounded,
                       title: 'Bônus',
                       onTap: () => context.push('/bonus'),
+                    ),
+                    _InicioCard(
+                      icon: Icons.label_rounded,
+                      title: 'Motivos',
+                      onTap: () => context.push('/motivos'),
                     ),
                     _InicioCard(
                       icon: Icons.person_add_alt_1_rounded,

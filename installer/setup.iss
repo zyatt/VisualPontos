@@ -1,8 +1,8 @@
 #define MyAppName "Controle de Pontos para Premiação"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.6.0"
 #define MyAppPublisher "Matheus Vinícius" 
 #define MyAppExeName "visualpremiumpontos.exe"
-#define MyAppId "{{7B8E0F9A-2C4D-4B1E-9A0A-3C8E2F5A1234}"
+#define MyAppId "{{9F3D1A67-5E8B-4C2A-BF7D-1A6E9C4B7890}"
 
 
 [Setup]
@@ -17,7 +17,7 @@ UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 SetupIconFile=logo.ico
 OutputDir=.
-OutputBaseFilename=VisualPremiumSetup-{#MyAppVersion}
+OutputBaseFilename=ControlePontosSetup-{#MyAppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -42,7 +42,7 @@ Name: "desktopicon"; Description: "Criar atalho na Área de Trabalho"; GroupDesc
 
 [Files]
 Source: "..\frontend\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
-Source: "config.json"; DestDir: "{commonappdata}\VisualPremiumSoftware"; Flags: onlyifdoesntexist uninsneveruninstall
+Source: "config.json"; DestDir: "{commonappdata}\ControlePontosPremiacao"; Flags: onlyifdoesntexist uninsneveruninstall
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

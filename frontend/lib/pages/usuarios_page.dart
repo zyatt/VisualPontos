@@ -70,26 +70,48 @@ class _UsuariosPageState extends State<UsuariosPage> {
             color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
+        leading: Tooltip(
+          message: 'Voltar',
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => context.pop(),
+            style: ButtonStyle(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+          ),
         ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: FilledButton.icon(
-              onPressed: _abrirCadastro,
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Novo usuário'),
+            child: Tooltip(
+              message: 'Novo usuário',
+              child: FilledButton.icon(
+                onPressed: _abrirCadastro,
+                style: ButtonStyle(
+                  mouseCursor:
+                      WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Novo usuário'),
+              ),
             ),
           ),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Atualizar',
+            style: ButtonStyle(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            onPressed: provider.carregando ? null : _carregar,
+          ),
+          const SizedBox(width: 4),
         ],
       ),
       body: RefreshIndicator(
         onRefresh: _carregar,
         child: Builder(
           builder: (context) {
-            if (provider.carregando && provider.usuarios.isEmpty) {
+            if (provider.carregando) {
               return const Center(child: CircularProgressIndicator());
             }
 

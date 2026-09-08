@@ -1,11 +1,15 @@
 class LancamentoBonus {
   final int id;
   final int colaboradorId;
-  final int bonusId;
-  final int categoriaId;
-  final int subcategoriaId;
-  final String categoriaNome;
-  final String subcategoriaDesc;
+  // Nulos quando o lançamento é uma penalidade AVULSA (sem categoria/
+  // subcategoria do catálogo — pontos informados diretamente pelo usuário).
+  final int? bonusId;
+  final int? categoriaId;
+  final int? subcategoriaId;
+  final String? categoriaNome;
+  final String? subcategoriaDesc;
+  final int? motivoId;
+  final String? motivoNome;
   final int pontos; // sempre negativo
   final String observacao;
   final String os;
@@ -13,14 +17,19 @@ class LancamentoBonus {
   final String usuarioNome;
   final DateTime criadoEm;
 
+  /// true quando o lançamento não veio de uma subcategoria do catálogo.
+  bool get ehAvulsa => subcategoriaId == null;
+
   LancamentoBonus({
     required this.id,
     required this.colaboradorId,
-    required this.bonusId,
-    required this.categoriaId,
-    required this.subcategoriaId,
-    required this.categoriaNome,
-    required this.subcategoriaDesc,
+    this.bonusId,
+    this.categoriaId,
+    this.subcategoriaId,
+    this.categoriaNome,
+    this.subcategoriaDesc,
+    this.motivoId,
+    this.motivoNome,
     required this.pontos,
     required this.observacao,
     required this.os,
@@ -33,11 +42,13 @@ class LancamentoBonus {
     return LancamentoBonus(
       id: json['id'] as int,
       colaboradorId: json['colaborador_id'] as int,
-      bonusId: json['bonus_id'] as int,
-      categoriaId: json['categoria_id'] as int,
-      subcategoriaId: json['subcategoria_id'] as int,
-      categoriaNome: json['categoria_nome'] as String? ?? '',
-      subcategoriaDesc: json['subcategoria_desc'] as String? ?? '',
+      bonusId: json['bonus_id'] as int?,
+      categoriaId: json['categoria_id'] as int?,
+      subcategoriaId: json['subcategoria_id'] as int?,
+      categoriaNome: json['categoria_nome'] as String?,
+      subcategoriaDesc: json['subcategoria_desc'] as String?,
+      motivoId: json['motivo_id'] as int?,
+      motivoNome: json['motivo_nome'] as String?,
       pontos: json['pontos'] as int,
       observacao: json['observacao'] as String? ?? '',
       os: json['os'] as String? ?? '',
