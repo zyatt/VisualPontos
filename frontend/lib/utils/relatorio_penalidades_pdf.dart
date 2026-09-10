@@ -83,6 +83,20 @@ Future<void> gerarRelatorioPenalidadesPdf({
   await _salvarEAbrir(doc, nomeArquivo);
 }
 
+/// Total de penalidades de um colaborador, usado no ranking exibido na
+/// página de estatísticas do relatório geral.
+class _RankingColaborador {
+  final String nome;
+  final int total;
+  final int quantidade;
+
+  const _RankingColaborador({
+    required this.nome,
+    required this.total,
+    required this.quantidade,
+  });
+}
+
 /// Agrupa os dados necessários para gerar a seção de um colaborador
 /// dentro do relatório geral.
 class DadosRelatorioColaborador {
@@ -135,6 +149,23 @@ Future<void> gerarRelatorioGeralPenalidadesPdf({
       ],
       logoImage: logoImage,
       subtitulo: 'Todos os colaboradores',
+      // Ranking de colaboradores com mais penalidades no período,
+      // ordenado pelo total de pontos descontados (em módulo) — mas
+      // exibindo também a quantidade de lançamentos de cada um, já que
+      // um colaborador pode ter poucos lançamentos com pontuação alta ou
+      // vice-versa. Só faz sentido no relatório geral (múltiplos
+      // colaboradores).
+      rankingColaboradores: [
+        for (final dados in dadosPorColaborador)
+          _RankingColaborador(
+            nome: dados.colaborador.nome,
+            total: dados.lancamentos.fold<int>(
+              0,
+              (soma, l) => soma + l.pontos.abs(),
+            ),
+            quantidade: dados.lancamentos.length,
+          ),
+      ]..sort((a, b) => b.total.compareTo(a.total)),
     ),
   );
 
@@ -438,6 +469,7 @@ pw.MultiPage _paginaEstatisticas({
   required List<LancamentoBonus> lancamentos,
   required pw.MemoryImage logoImage,
   required String subtitulo,
+  List<_RankingColaborador> rankingColaboradores = const [],
 }) {
   final geradoEm = DateFormat('dd/MM/yyyy \'às\' HH:mm').format(DateTime.now());
 
@@ -500,111 +532,132 @@ pw.MultiPage _paginaEstatisticas({
           ],
         ),
       ),
-      pw.SizedBox(height: 20),
+      pw.SizedBox(height: 12),
 
       // ── Gráfico de pizza: % de penalidades por motivo ─────────────────
       pw.Text(
         'Distribuição de penalidades por motivo',
         style: const pw.TextStyle(
-          fontSize: 12,
+          fontSize: 10.5,
           fontWeight: pw.FontWeight.bold,
           color: _cinzaTexto,
         ),
       ),
-      pw.SizedBox(height: 10),
+      pw.SizedBox(height: 6),
       if (ordenado.isEmpty || totalGeral == 0)
         pw.Container(
-          padding: const pw.EdgeInsets.all(24),
+          padding: const pw.EdgeInsets.all(12),
           alignment: pw.Alignment.center,
           child: pw.Text(
             'Nenhuma penalidade com motivo lançada neste mês.',
-            style: const pw.TextStyle(fontSize: 11, color: _cinzaTexto),
+            style: const pw.TextStyle(fontSize: 9.5, color: _cinzaTexto),
           ),
         )
       else
-        pw.Center(
-          child: pw.Column(
-            mainAxisSize: pw.MainAxisSize.min,
-            children: [
-              pw.SizedBox(
-                width: 160,
-                height: 160,
-                child: pw.CustomPaint(
-                  size: const PdfPoint(160, 160),
-                  painter: (canvas, size) =>
-                      _desenharPizza(canvas, size, ordenado, totalGeral),
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            pw.SizedBox(
+              width: 100,
+              height: 100,
+              child: pw.CustomPaint(
+                size: const PdfPoint(100, 100),
+                painter: (canvas, size) => _desenharPizza(
+                  canvas,
+                  size,
+                  ordenado,
+                  totalGeral,
+                  font: pw.Font.helveticaBold().getFont(context),
                 ),
               ),
-              pw.SizedBox(height: 16),
-              // Legenda em um bloco de largura fixa e centralizado, com o
-              // nome do motivo colado à cor e o percentual logo em
-              // seguida — em vez de esticar pela largura da página.
-              pw.Container(
-                constraints: const pw.BoxConstraints(maxWidth: 280),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    for (int i = 0; i < ordenado.length; i++)
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.only(bottom: 6),
-                        child: pw.Row(
-                          mainAxisSize: pw.MainAxisSize.min,
-                          children: [
-                            pw.Container(
-                              width: 10,
-                              height: 10,
-                              decoration: pw.BoxDecoration(
-                                color:
-                                    _paletaGrafico[i % _paletaGrafico.length],
-                                borderRadius: const pw.BorderRadius.all(
-                                    pw.Radius.circular(2)),
-                              ),
+            ),
+            pw.SizedBox(width: 16),
+            // Legenda ao lado da pizza (em vez de abaixo), economizando
+            // altura vertical na página.
+            pw.Expanded(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  for (int i = 0; i < ordenado.length; i++)
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.only(bottom: 3),
+                      child: pw.Row(
+                        mainAxisSize: pw.MainAxisSize.min,
+                        children: [
+                          pw.Container(
+                            width: 8,
+                            height: 8,
+                            decoration: pw.BoxDecoration(
+                              color:
+                                  _paletaGrafico[i % _paletaGrafico.length],
+                              borderRadius: const pw.BorderRadius.all(
+                                  pw.Radius.circular(2)),
                             ),
-                            pw.SizedBox(width: 8),
-                            pw.Text(
+                          ),
+                          pw.SizedBox(width: 6),
+                          pw.Expanded(
+                            child: pw.Text(
                               ordenado[i].motivoNome,
                               style: const pw.TextStyle(
-                                  fontSize: 9.5, color: _cinzaTexto),
+                                  fontSize: 8.5, color: _cinzaTexto),
                             ),
-                            pw.SizedBox(width: 10),
-                            pw.Text(
-                              '${(ordenado[i].total / totalGeral * 100).toStringAsFixed(1)}% '
-                              '(${ordenado[i].total})',
-                              style: const pw.TextStyle(
-                                fontSize: 9.5,
-                                fontWeight: pw.FontWeight.bold,
-                                color: _cinzaTexto,
-                              ),
+                          ),
+                          pw.SizedBox(width: 6),
+                          pw.Text(
+                            '${(ordenado[i].total / totalGeral * 100).toStringAsFixed(1)}% '
+                            '(${ordenado[i].total})',
+                            style: const pw.TextStyle(
+                              fontSize: 8.5,
+                              fontWeight: pw.FontWeight.bold,
+                              color: _cinzaTexto,
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
 
-      pw.SizedBox(height: 28),
+      pw.SizedBox(height: 16),
+
+      // ── Ranking: colaboradores com mais penalidades ────────────────────
+      // Só é exibido quando a lista é informada (relatório geral, que
+      // agrega vários colaboradores — no relatório individual não faz
+      // sentido, já que há apenas um).
+      if (rankingColaboradores.isNotEmpty) ...[
+        pw.Text(
+          'Colaboradores com mais penalidades',
+          style: const pw.TextStyle(
+            fontSize: 10.5,
+            fontWeight: pw.FontWeight.bold,
+            color: _cinzaTexto,
+          ),
+        ),
+        pw.SizedBox(height: 6),
+        _blocoRankingColaboradores(rankingColaboradores),
+        pw.SizedBox(height: 16),
+      ],
 
       // ── Gráfico de barras: penalidades por dia do mês ─────────────────
       pw.Text(
         'Penalidades por dia do mês',
         style: const pw.TextStyle(
-          fontSize: 12,
+          fontSize: 10.5,
           fontWeight: pw.FontWeight.bold,
           color: _cinzaTexto,
         ),
       ),
-      pw.SizedBox(height: 10),
+      pw.SizedBox(height: 6),
       if (maxPorDia == 0)
         pw.Container(
-          padding: const pw.EdgeInsets.all(24),
+          padding: const pw.EdgeInsets.all(12),
           alignment: pw.Alignment.center,
           child: pw.Text(
             'Nenhuma penalidade lançada neste mês.',
-            style: const pw.TextStyle(fontSize: 11, color: _cinzaTexto),
+            style: const pw.TextStyle(fontSize: 9.5, color: _cinzaTexto),
           ),
         )
       else ...[
@@ -614,14 +667,14 @@ pw.MultiPage _paginaEstatisticas({
         pw.Text(
           'Quantidade de penalidades',
           style: const pw.TextStyle(
-            fontSize: 8,
+            fontSize: 7,
             fontWeight: pw.FontWeight.bold,
             color: _cinzaTexto,
           ),
         ),
-        pw.SizedBox(height: 6),
+        pw.SizedBox(height: 4),
         pw.SizedBox(
-          height: 200,
+          height: 130,
           child: pw.Chart(
             grid: pw.CartesianGrid(
               xAxis: pw.FixedAxis(
@@ -632,20 +685,20 @@ pw.MultiPage _paginaEstatisticas({
                 ticks: true,
                 marginStart: 8,
                 marginEnd: 8,
-                textStyle: const pw.TextStyle(fontSize: 6.5, color: _cinzaTexto),
+                textStyle: const pw.TextStyle(fontSize: 6, color: _cinzaTexto),
               ),
               yAxis: pw.FixedAxis(
                 _gerarEscalaEixoY(maxPorDia),
                 divisions: false,
                 ticks: true,
                 format: (v) => v.toInt().toString(),
-                textStyle: const pw.TextStyle(fontSize: 7, color: _cinzaTexto),
+                textStyle: const pw.TextStyle(fontSize: 6.5, color: _cinzaTexto),
               ),
             ),
             datasets: [
               pw.BarDataSet(
                 color: _laranja,
-                width: 6,
+                width: 5,
                 data: [
                   for (int dia = 1; dia <= diasNoMes; dia++)
                     pw.PointChartValue(
@@ -655,13 +708,13 @@ pw.MultiPage _paginaEstatisticas({
             ],
           ),
         ),
-        pw.SizedBox(height: 6),
+        pw.SizedBox(height: 4),
         // Rótulo do eixo X, centralizado abaixo do gráfico.
         pw.Center(
           child: pw.Text(
             'Dia do mês',
             style: const pw.TextStyle(
-              fontSize: 8,
+              fontSize: 7,
               fontWeight: pw.FontWeight.bold,
               color: _cinzaTexto,
             ),
@@ -669,12 +722,119 @@ pw.MultiPage _paginaEstatisticas({
         ),
       ],
 
-      pw.SizedBox(height: 24),
+      pw.SizedBox(height: 16),
       pw.Text(
         'Relatório gerado em $geradoEm',
         style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey500),
       ),
     ],
+  );
+}
+
+/// Bloco com o ranking de colaboradores que mais receberam penalidades
+/// no período (já ordenado por total de pontos decrescente), exibido
+/// como barras horizontais compactas — uma por colaborador, com o nome,
+/// a barra proporcional ao maior total de pontos do ranking, e a
+/// quantidade de penalidades junto com o total de pontos descontados
+/// (ex.: "4 penalidades · 43 pts"). Limitado aos 10 primeiros para não
+/// estourar a página quando há muitos colaboradores.
+pw.Widget _blocoRankingColaboradores(List<_RankingColaborador> ranking) {
+  final top = ranking.take(10).toList();
+  final maiorTotal = top.first.total == 0 ? 1 : top.first.total;
+
+  // Largura total (em pontos) disponível para a barra em si — a coluna
+  // de barra tem largura fixa (ver `pw.SizedBox(width: _larguraBarraMax)`
+  // abaixo), então o comprimento de cada barra é calculado aqui como
+  // fração dessa largura, em vez de usar um widget tipo
+  // `FractionallySizedBox` (que não existe no pacote `pdf`, só no
+  // Flutter/Material).
+  const larguraBarraMax = 160.0;
+
+  return pw.Container(
+    padding: const pw.EdgeInsets.all(8),
+    decoration: pw.BoxDecoration(
+      color: _bgCabecalho,
+      border: pw.Border.all(color: _cinzaBorda, width: 0.7),
+      borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+    ),
+    child: pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        for (int i = 0; i < top.length; i++)
+          pw.Padding(
+            padding: pw.EdgeInsets.only(bottom: i == top.length - 1 ? 0 : 5),
+            child: pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.SizedBox(
+                  width: 14,
+                  child: pw.Text(
+                    '${i + 1}º',
+                    style: const pw.TextStyle(
+                      fontSize: 8,
+                      fontWeight: pw.FontWeight.bold,
+                      color: _cinzaTexto,
+                    ),
+                  ),
+                ),
+                pw.SizedBox(
+                  width: 100,
+                  child: pw.Text(
+                    top[i].nome,
+                    style: const pw.TextStyle(fontSize: 8.5, color: _cinzaTexto),
+                    maxLines: 1,
+                    overflow: pw.TextOverflow.clip,
+                  ),
+                ),
+                pw.SizedBox(width: 6),
+                // Barra de fundo (trilho cinza) com a barra colorida
+                // desenhada por cima, à esquerda, com largura
+                // proporcional ao total deste colaborador em relação ao
+                // maior total do ranking.
+                pw.Stack(
+                  children: [
+                    pw.Container(
+                      width: larguraBarraMax,
+                      height: 8,
+                      decoration: const pw.BoxDecoration(
+                        color: PdfColors.grey300,
+                        borderRadius: pw.BorderRadius.all(pw.Radius.circular(2)),
+                      ),
+                    ),
+                    pw.Container(
+                      width: larguraBarraMax * (top[i].total / maiorTotal),
+                      height: 8,
+                      decoration: const pw.BoxDecoration(
+                        color: _laranja,
+                        borderRadius:
+                            pw.BorderRadius.all(pw.Radius.circular(2)),
+                      ),
+                    ),
+                  ],
+                ),
+                pw.SizedBox(width: 8),
+                // Quantidade de lançamentos + total de pontos, lado a
+                // lado — antes só o total de pontos aparecia, o que
+                // escondia se o resultado veio de muitas penalidades
+                // pequenas ou de poucas penalidades pesadas.
+                pw.Expanded(
+                  child: pw.Text(
+                    '${top[i].quantidade} '
+                    '${top[i].quantidade == 1 ? 'penalidade' : 'penalidades'}'
+                    ' · ${top[i].total} pts',
+                    textAlign: pw.TextAlign.right,
+                    style: const pw.TextStyle(
+                      fontSize: 8,
+                      fontWeight: pw.FontWeight.bold,
+                      color: _cinzaTexto,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    ),
   );
 }
 
@@ -692,15 +852,58 @@ List<int> _gerarEscalaEixoY(int maxValor) {
 /// https://github.com/DavBfr/dart_pdf/issues/596). Cada fatia é um setor
 /// circular desenhado com `moveTo` + `bezierArc` + `lineTo` + `fillPath`,
 /// com ângulo proporcional ao percentual do motivo no total.
+///
+/// Quando [font] é informada, também escreve o percentual (e a
+/// quantidade) de cada fatia centralizado dentro dela — só quando a
+/// fatia é grande o bastante para o texto caber sem transbordar
+/// (ver [_labelMinFatia]).
 void _desenharPizza(
   PdfGraphics canvas,
   PdfPoint size,
   List<ResumoMotivo> ordenado,
-  int totalGeral,
-) {
+  int totalGeral, {
+  PdfFont? font,
+}) {
   final cx = size.x / 2;
   final cy = size.y / 2;
   final raio = math.min(size.x, size.y) / 2;
+
+  // Fração mínima de fatia (em relação ao total) para ainda desenharmos
+  // o rótulo dentro dela — fatias muito finas não têm espaço para o
+  // texto sem que ele vaze para fora do círculo.
+  const labelMinFatia = 0.06;
+  const labelFontSize = 8.0;
+
+  void desenharRotulo(double anguloMeio, double fatia, int total) {
+    if (font == null || fatia < labelMinFatia) return;
+
+    final texto = '${(fatia * 100).toStringAsFixed(0)}%';
+
+    // Posiciona o texto a ~60% do raio, no ângulo médio da fatia — fica
+    // centralizado dentro da fatia tanto radial quanto angularmente.
+    final rTexto = raio * 0.6;
+    final tx = cx + rTexto * math.cos(anguloMeio);
+    final ty = cy + rTexto * math.sin(anguloMeio);
+
+    // Largura/altura aproximadas do texto para centralizá-lo no ponto
+    // (tx, ty). `drawString` posiciona pela baseline no canto inferior
+    // esquerdo, então precisamos deslocar manualmente. Usamos uma
+    // estimativa por caractere (fonte bold, ~0.6 * fontSize de largura
+    // média) em vez de depender de APIs de métrica de fonte, já que o
+    // texto aqui é sempre curto e previsível ("NN%").
+    final largura = texto.length * labelFontSize * 0.62;
+    const altura = labelFontSize * 0.7;
+
+    canvas
+      ..setFillColor(PdfColors.white)
+      ..drawString(
+        font,
+        labelFontSize,
+        texto,
+        tx - largura / 2,
+        ty - altura / 2,
+      );
+  }
 
   // Caso especial: um único motivo concentra 100% das penalidades. O
   // arco degenera (ponto inicial == ponto final), então desenha um
@@ -711,6 +914,7 @@ void _desenharPizza(
       ..setFillColor(_paletaGrafico[0])
       ..drawEllipse(cx, cy, raio, raio)
       ..fillPath();
+    desenharRotulo(math.pi / 2, 1, ordenado[0].total);
     return;
   }
 
@@ -739,6 +943,8 @@ void _desenharPizza(
       ..bezierArc(x1, y1, raio, raio, x2, y2, large: grande, sweep: false)
       ..lineTo(cx, cy)
       ..fillPath();
+
+    desenharRotulo(anguloAtual - anguloFatia / 2, fatia, ordenado[i].total);
 
     anguloAtual = anguloFim;
   }

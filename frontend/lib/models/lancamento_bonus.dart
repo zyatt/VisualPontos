@@ -13,12 +13,21 @@ class LancamentoBonus {
   final int pontos; // sempre negativo
   final String observacao;
   final String os;
+  // Caminho relativo (ex.: "uploads/lancamentos_bonus/xxx.jpg") de uma
+  // imagem opcional anexada ao lançamento. Null quando não há anexo.
+  final String? imagemPath;
   final int usuarioId;
   final String usuarioNome;
   final DateTime criadoEm;
 
   /// true quando o lançamento não veio de uma subcategoria do catálogo.
   bool get ehAvulsa => subcategoriaId == null;
+
+  /// URL completa da imagem anexada (quando houver), pronta para uso em
+  /// Image.network. Null quando o lançamento não tem imagem.
+  String? get imagemUrl => imagemPath != null
+      ? 'https://visualpremium.com.br/api/$imagemPath'
+      : null;
 
   LancamentoBonus({
     required this.id,
@@ -33,6 +42,7 @@ class LancamentoBonus {
     required this.pontos,
     required this.observacao,
     required this.os,
+    this.imagemPath,
     required this.usuarioId,
     required this.usuarioNome,
     required this.criadoEm,
@@ -52,6 +62,7 @@ class LancamentoBonus {
       pontos: json['pontos'] as int,
       observacao: json['observacao'] as String? ?? '',
       os: json['os'] as String? ?? '',
+      imagemPath: json['imagem_path'] as String?,
       usuarioId: json['usuario_id'] as int,
       usuarioNome: json['usuario_nome'] as String? ?? '',
       // formato "YYYY-MM-DD HH:MM:SS" vindo do MySQL

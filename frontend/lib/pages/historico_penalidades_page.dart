@@ -10,6 +10,7 @@ import '../providers/usuario_provider.dart';
 import '../services/lancamento_bonus_service.dart' show ResumoMotivo;
 import '../theme/app_theme.dart';
 import '../utils/relatorio_penalidades_pdf.dart';
+import '../widgets/visualizador_imagem_lancamento.dart';
 
 const int _kPontosIniciaisMes = 100;
 
@@ -746,6 +747,45 @@ class _LancamentoTile extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
+          if (lancamento.imagemUrl != null) ...[
+            GestureDetector(
+              onTap: () =>
+                  abrirImagemEmTelaCheia(context, lancamento.imagemUrl!),
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.network(
+                    lancamento.imagemUrl!,
+                    height: 120,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (context, child, progress) {
+                      if (progress == null) return child;
+                      return Container(
+                        height: 120,
+                        alignment: Alignment.center,
+                        color: scheme.surfaceContainerHighest,
+                        child: const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      );
+                    },
+                    errorBuilder: (context, error, stack) => Container(
+                      height: 120,
+                      alignment: Alignment.center,
+                      color: scheme.surfaceContainerHighest,
+                      child: Icon(Icons.broken_image_outlined,
+                          color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           if (lancamento.motivoNome != null &&
               lancamento.motivoNome!.isNotEmpty) ...[
             _InfoLinha(rotulo: 'Motivo', valor: lancamento.motivoNome!),

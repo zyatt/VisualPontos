@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:developer' as developer;
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../models/lancamento_bonus.dart';
 
@@ -13,6 +14,11 @@ class LancamentoBonusResponse {
   final LancamentoBonus? lancamento;
   final List<LancamentoBonus>? lista;
   final List<ResumoMotivo>? resumoMotivos;
+  // Preenchidos apenas pela verificação de OS recente.
+  final bool osEncontrada;
+  final OsRecente? osRecente;
+  // Preenchido apenas pelo upload de imagem.
+  final String? imagemPath;
 
   LancamentoBonusResponse({
     required this.success,
@@ -24,7 +30,34 @@ class LancamentoBonusResponse {
     this.lancamento,
     this.lista,
     this.resumoMotivos,
+    this.osEncontrada = false,
+    this.osRecente,
+    this.imagemPath,
   });
+}
+
+/// Dados do lançamento anterior encontrado com a mesma OS (últimas 24h).
+class OsRecente {
+  final DateTime criadoEm;
+  final String usuarioNome;
+  final String? motivoNome;
+  final int pontos;
+
+  OsRecente({
+    required this.criadoEm,
+    required this.usuarioNome,
+    this.motivoNome,
+    required this.pontos,
+  });
+
+  factory OsRecente.fromJson(Map<String, dynamic> json) {
+    return OsRecente(
+      criadoEm: DateTime.parse(json['criado_em'] as String),
+      usuarioNome: json['usuario_nome'] as String? ?? '',
+      motivoNome: json['motivo_nome'] as String?,
+      pontos: json['pontos'] as int,
+    );
+  }
 }
 
 /// Contagem de penalidades lançadas para um motivo em um mês/ano.
@@ -187,12 +220,100 @@ class LancamentoBonusService {
     }
   }
 
+  /// Verifica se o colaborador já teve uma penalidade lançada com a mesma
+  /// OS nas últimas 24 horas. Usado para avisar o usuário antes de lançar
+  /// uma possível duplicidade (ele ainda pode confirmar e prosseguir).
+  Future<LancamentoBonusResponse> verificarOsRecente({
+    required String token,
+    required int colaboradorId,
+    required String os,
+  }) async {
+    try {
+      final query = {
+        'recurso': 'verificar_os',
+        'colaborador_id': '$colaboradorId',
+        'os': os,
+      };
+      final uri = Uri.parse('$_base/lancamentos_bonus.php')
+          .replace(queryParameters: query);
+
+      final res =
+          await http.get(uri, headers: _headers(token)).timeout(const Duration(seconds: 15));
+      developer.log('[LancamentoBonusService.verificarOsRecente] status=${res.statusCode} body=${res.body}');
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+
+      if (res.statusCode == 200 && data['success'] == true) {
+        final encontrado = data['encontrado'] == true;
+        final lancamentoJson = data['lancamento'] as Map<String, dynamic>?;
+        return LancamentoBonusResponse(
+          success: true,
+          osEncontrada: encontrado,
+          osRecente: lancamentoJson != null
+              ? OsRecente.fromJson(lancamentoJson)
+              : null,
+        );
+      }
+      return LancamentoBonusResponse(
+        success: false,
+        message: data['message'] as String? ?? 'Erro ao verificar a OS',
+      );
+    } catch (e, st) {
+      developer.log('[LancamentoBonusService.verificarOsRecente] ERRO: $e\n$st');
+      // Falha de rede aqui não deve travar o fluxo de lançamento: apenas
+      // segue sem o aviso (não há dado suficiente para checar).
+      return LancamentoBonusResponse(success: true, osEncontrada: false);
+    }
+  }
+
+  /// Envia uma imagem (foto ou arquivo escolhido pelo usuário) para o
+  /// servidor antes de lançar a penalidade. Retorna o caminho relativo
+  /// (imagemPath) em caso de sucesso, ou null em caso de falha — o
+  /// chamador decide se quer bloquear o lançamento ou seguir sem a
+  /// imagem quando o upload falhar.
+  Future<LancamentoBonusResponse> uploadImagem({
+    required String token,
+    required File arquivo,
+  }) async {
+    try {
+      final uri = Uri.parse('$_base/upload_imagem.php');
+      final request = http.MultipartRequest('POST', uri)
+        ..headers['Authorization'] = 'Bearer $token'
+        ..files.add(await http.MultipartFile.fromPath('imagem', arquivo.path));
+
+      final streamedResponse =
+          await request.send().timeout(const Duration(seconds: 30));
+      final res = await http.Response.fromStream(streamedResponse);
+      developer.log('[LancamentoBonusService.uploadImagem] status=${res.statusCode} body=${res.body}');
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+
+      if (res.statusCode == 200 && data['success'] == true) {
+        return LancamentoBonusResponse(
+          success: true,
+          imagemPath: data['imagem_path'] as String?,
+        );
+      }
+      return LancamentoBonusResponse(
+        success: false,
+        message: data['message'] as String? ?? 'Não foi possível enviar a imagem',
+      );
+    } catch (e, st) {
+      developer.log('[LancamentoBonusService.uploadImagem] ERRO: $e\n$st');
+      return LancamentoBonusResponse(
+        success: false,
+        message: 'Não foi possível enviar a imagem. Verifique sua internet.',
+      );
+    }
+  }
+
   /// Lança uma nova penalidade para o colaborador.
   ///
   /// Informe [subcategoriaId] para uma penalidade vinculada ao catálogo
   /// de categorias/subcategorias (os pontos são deduzidos no backend a
   /// partir da subcategoria). Para uma penalidade AVULSA (sem categoria
   /// do catálogo), omita [subcategoriaId] e informe [pontos] diretamente.
+  ///
+  /// [imagemPath] é o caminho relativo já retornado por [uploadImagem]
+  /// (opcional — omita quando não há imagem anexada).
   Future<LancamentoBonusResponse> lancar({
     required String token,
     required int colaboradorId,
@@ -201,6 +322,7 @@ class LancamentoBonusService {
     required int motivoId,
     required String observacao,
     required String os,
+    String? imagemPath,
   }) async {
     assert(
       subcategoriaId != null || pontos != null,
@@ -218,6 +340,7 @@ class LancamentoBonusService {
               'motivo_id': motivoId,
               'observacao': observacao,
               'os': os,
+              if (imagemPath != null) 'imagem_path': imagemPath,
             }),
           )
           .timeout(const Duration(seconds: 15));

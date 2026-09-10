@@ -1,5 +1,5 @@
 #define MyAppName "Controle de Pontos para Premiação"
-#define MyAppVersion "1.6.0"
+#define MyAppVersion "1.7.0"
 #define MyAppPublisher "Matheus Vinícius" 
 #define MyAppExeName "visualpremiumpontos.exe"
 #define MyAppId "{{9F3D1A67-5E8B-4C2A-BF7D-1A6E9C4B7890}"

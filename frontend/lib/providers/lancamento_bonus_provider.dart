@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
 import '../models/lancamento_bonus.dart';
 import '../services/lancamento_bonus_service.dart';
 
@@ -93,12 +94,41 @@ class LancamentoBonusProvider extends ChangeNotifier {
     return res.success ? (res.resumoMotivos ?? []) : [];
   }
 
+  /// Verifica se o colaborador já teve uma penalidade lançada com a mesma
+  /// OS nas últimas 24h. Não altera o estado do provider — apenas repassa
+  /// a resposta do service para quem chamou decidir o que fazer (ex.: exibir
+  /// um dialog de confirmação antes de lançar a nova penalidade).
+  Future<LancamentoBonusResponse?> verificarOsRecente({
+    required String token,
+    required int colaboradorId,
+    required String os,
+  }) {
+    return _service.verificarOsRecente(
+      token: token,
+      colaboradorId: colaboradorId,
+      os: os,
+    );
+  }
+
+  /// Envia a imagem escolhida pelo usuário para o servidor. Retorna o
+  /// caminho relativo (imagemPath) em caso de sucesso, ou null em caso de
+  /// falha — quem chamou decide se bloqueia o lançamento ou segue sem a
+  /// imagem.
+  Future<String?> uploadImagem({
+    required String token,
+    required File arquivo,
+  }) async {
+    final res = await _service.uploadImagem(token: token, arquivo: arquivo);
+    return res.success ? res.imagemPath : null;
+  }
+
   /// Lança a penalidade e já atualiza o saldo de pontos local.
   /// Retorna null em caso de sucesso, ou uma mensagem de erro.
   ///
   /// Informe [subcategoriaId] para uma penalidade do catálogo de
   /// categorias/subcategorias, ou [pontos] para uma penalidade AVULSA
-  /// (sem vínculo com o catálogo).
+  /// (sem vínculo com o catálogo). [imagemPath] é opcional (já deve ter
+  /// sido obtido antes via [uploadImagem]).
   Future<String?> lancarPenalidade({
     required String token,
     required int colaboradorId,
@@ -107,6 +137,7 @@ class LancamentoBonusProvider extends ChangeNotifier {
     required int motivoId,
     required String observacao,
     required String os,
+    String? imagemPath,
   }) async {
     _carregando = true;
     notifyListeners();
@@ -119,6 +150,7 @@ class LancamentoBonusProvider extends ChangeNotifier {
       motivoId: motivoId,
       observacao: observacao,
       os: os,
+      imagemPath: imagemPath,
     );
 
     _carregando = false;
