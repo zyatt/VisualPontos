@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/usuario.dart';
+import '../config/api_config.dart';
 
 /// Serviço para operações administrativas sobre usuários (listar, editar,
 /// excluir). Separado de [AuthService] para não misturar com login/sessão.
@@ -19,7 +20,8 @@ class UsuarioAdminResponse {
 }
 
 class UsuarioAdminService {
-  static const String baseUrl = 'https://visualpremium.com.br/api';
+  // URL base lida do .env (ApiConfig.baseUrl / API_BASE_URL).
+  static String get baseUrl => ApiConfig.baseUrl;
 
   Future<UsuarioAdminResponse> listar({required String token}) async {
     try {

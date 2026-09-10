@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/usuario.dart';
+import '../config/api_config.dart';
 
 class AuthResponse {
   final bool success;
@@ -12,11 +13,16 @@ class AuthResponse {
 }
 
 class AuthService {
-  // Backend PHP hospedado na Kinghost, dentro de www/api/
-  static const String baseUrl = 'https://visualpremium.com.br/api';
+  // URL base lida do .env (ApiConfig.baseUrl / API_BASE_URL).
+  static String get baseUrl => ApiConfig.baseUrl;
 
   Future<AuthResponse> login(String usuario, String senha) async {
     try {
+      // ignore: avoid_print
+      print('DEBUG baseUrl = $baseUrl');
+      // ignore: avoid_print
+      print('DEBUG URL completa = $baseUrl/login.php');
+
       final response = await http
           .post(
             Uri.parse('$baseUrl/login.php'),
@@ -24,6 +30,11 @@ class AuthService {
             body: jsonEncode({'usuario': usuario, 'senha': senha}),
           )
           .timeout(const Duration(seconds: 15));
+
+      // ignore: avoid_print
+      print('DEBUG status = ${response.statusCode}');
+      // ignore: avoid_print
+      print('DEBUG body = ${response.body}');
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
 
@@ -39,7 +50,11 @@ class AuthService {
         success: false,
         message: data['message'] as String? ?? 'Usuário ou senha inválidos',
       );
-    } catch (e) {
+    } catch (e, st) {
+      // ignore: avoid_print
+      print('DEBUG ERRO login: $e');
+      // ignore: avoid_print
+      print('DEBUG STACK: $st');
       return AuthResponse(
         success: false,
         message: 'Não foi possível conectar ao servidor. Verifique sua internet.',

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/colaborador.dart';
+import '../config/api_config.dart';
 
 class ColaboradorResponse {
   final bool success;
@@ -17,8 +18,8 @@ class ColaboradorResponse {
 }
 
 class ColaboradorService {
-  // Mesmo backend PHP hospedado na Kinghost, dentro de www/api/
-  static const String baseUrl = 'https://visualpremium.com.br/api';
+  // URL base lida do .env (ApiConfig.baseUrl / API_BASE_URL).
+  static String get baseUrl => ApiConfig.baseUrl;
 
   Future<ColaboradorResponse> cadastrar({
     required String token,

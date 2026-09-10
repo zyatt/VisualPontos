@@ -3,6 +3,7 @@ import 'dart:developer' as developer;
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../models/lancamento_bonus.dart';
+import '../config/api_config.dart';
 
 class LancamentoBonusResponse {
   final bool success;
@@ -82,7 +83,8 @@ class ResumoMotivo {
 }
 
 class LancamentoBonusService {
-  static const String _base = 'https://visualpremium.com.br/api';
+  // URL base lida do .env (ApiConfig.baseUrl / API_BASE_URL).
+  static String get _base => ApiConfig.baseUrl;
 
   Map<String, String> _headers(String token) => {
         'Content-Type': 'application/json',

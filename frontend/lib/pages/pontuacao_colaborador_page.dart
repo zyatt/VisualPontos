@@ -630,27 +630,30 @@ class _PontuacaoColaboradorPageState extends State<PontuacaoColaboradorPage> {
                 },
               ),
               const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Tooltip(
-                  message: 'Lançar penalidade avulsa (fora do catálogo)',
-                  child: OutlinedButton.icon(
-                    style: ButtonStyle(
-                      mouseCursor:
-                          WidgetStateProperty.all(SystemMouseCursors.click),
-                      foregroundColor:
-                          WidgetStateProperty.all(AppTheme.error),
-                      side: WidgetStateProperty.all(
-                        BorderSide(color: AppTheme.error.withValues(alpha: 0.5)),
+              if (context.watch<UsuarioProvider>().usuario?.role.toUpperCase() ==
+                  'ADMIN') ...[
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Tooltip(
+                    message: 'Lançar penalidade avulsa (fora do catálogo)',
+                    child: OutlinedButton.icon(
+                      style: ButtonStyle(
+                        mouseCursor:
+                            WidgetStateProperty.all(SystemMouseCursors.click),
+                        foregroundColor:
+                            WidgetStateProperty.all(AppTheme.error),
+                        side: WidgetStateProperty.all(
+                          BorderSide(color: AppTheme.error.withValues(alpha: 0.5)),
+                        ),
                       ),
+                      onPressed: _lancarPenalidadeAvulsa,
+                      icon: const Icon(Icons.remove_circle_outline_rounded,
+                          size: 18),
+                      label: const Text('Lançar penalidade'),
                     ),
-                    onPressed: _lancarPenalidadeAvulsa,
-                    icon: const Icon(Icons.remove_circle_outline_rounded,
-                        size: 18),
-                    label: const Text('Lançar penalidade'),
                   ),
                 ),
-              ),
+              ],
               const SizedBox(height: 24),
               Text(
                 'Categorias e subcategorias',
@@ -966,75 +969,96 @@ class _UltimasPenalidades extends StatelessWidget {
   }
 }
 
-class _PenalidadeRecenteTile extends StatelessWidget {
+class _PenalidadeRecenteTile extends StatefulWidget {
   final LancamentoBonus lancamento;
 
   const _PenalidadeRecenteTile({required this.lancamento});
 
   @override
+  State<_PenalidadeRecenteTile> createState() =>
+      _PenalidadeRecenteTileState();
+}
+
+class _PenalidadeRecenteTileState extends State<_PenalidadeRecenteTile> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final lancamento = widget.lancamento;
     final dataFormatada =
         DateFormat('dd/MM/yyyy HH:mm').format(lancamento.criadoEm);
     final descricao = lancamento.ehAvulsa
         ? 'Penalidade avulsa'
         : (lancamento.subcategoriaDesc ?? 'Penalidade');
 
-    return InkWell(
-      onTap: () => _abrirDetalheLancamento(context, lancamento),
-      mouseCursor: SystemMouseCursors.click,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    descricao,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.nunito(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: scheme.onSurface,
-                    ),
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        color: _hover
+            ? scheme.onSurface.withValues(alpha: 0.04)
+            : Colors.transparent,
+        child: InkWell(
+          onTap: () => _abrirDetalheLancamento(context, lancamento),
+          mouseCursor: SystemMouseCursors.click,
+          hoverColor: Colors.transparent,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        descricao,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.nunito(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: scheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$dataFormatada · OS ${lancamento.os}',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '$dataFormatada · OS ${lancamento.os}',
-                    style: GoogleFonts.nunito(
-                      fontSize: 11.5,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (lancamento.imagemUrl != null) ...[
-              const SizedBox(width: 8),
-              Icon(Icons.image_outlined,
-                  size: 16, color: scheme.onSurfaceVariant),
-            ],
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: AppTheme.error.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                '${lancamento.pontos}',
-                style: GoogleFonts.nunito(
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.error,
-                  fontSize: 12,
                 ),
-              ),
+                if (lancamento.imagemUrl != null) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.image_outlined,
+                      size: 16, color: scheme.onSurfaceVariant),
+                ],
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppTheme.error.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${lancamento.pontos}',
+                    style: GoogleFonts.nunito(
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.error,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

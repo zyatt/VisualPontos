@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
@@ -53,7 +54,7 @@ Future<void> gerarRelatorioPenalidadesPdf({
   final logoImage = await _carregarLogo();
 
   doc.addPage(
-    _paginaColaborador(
+    await _paginaColaborador(
       colaborador: colaborador,
       mes: mes,
       ano: ano,
@@ -150,11 +151,10 @@ Future<void> gerarRelatorioGeralPenalidadesPdf({
       logoImage: logoImage,
       subtitulo: 'Todos os colaboradores',
       // Ranking de colaboradores com mais penalidades no período,
-      // ordenado pelo total de pontos descontados (em módulo) — mas
-      // exibindo também a quantidade de lançamentos de cada um, já que
-      // um colaborador pode ter poucos lançamentos com pontuação alta ou
-      // vice-versa. Só faz sentido no relatório geral (múltiplos
-      // colaboradores).
+      // ordenado pela QUANTIDADE de lançamentos (não pelos pontos
+      // descontados) — também exibe o total de pontos de cada um, mas
+      // isso é só informativo, não afeta a posição no ranking. Só faz
+      // sentido no relatório geral (múltiplos colaboradores).
       rankingColaboradores: [
         for (final dados in dadosPorColaborador)
           _RankingColaborador(
@@ -165,13 +165,13 @@ Future<void> gerarRelatorioGeralPenalidadesPdf({
             ),
             quantidade: dados.lancamentos.length,
           ),
-      ]..sort((a, b) => b.total.compareTo(a.total)),
+      ]..sort((a, b) => b.quantidade.compareTo(a.quantidade)),
     ),
   );
 
   for (final dados in dadosPorColaborador) {
     doc.addPage(
-      _paginaColaborador(
+      await _paginaColaborador(
         colaborador: dados.colaborador,
         mes: mes,
         ano: ano,
@@ -222,6 +222,50 @@ Future<pw.MemoryImage> _carregarLogo() async {
   // Logo da empresa (assets/images/logoPreta.png)
   final logoBytes = await rootBundle.load('assets/images/logoPreta.png');
   return pw.MemoryImage(logoBytes.buffer.asUint8List());
+}
+
+/// Imagem já baixada de um lançamento, junto da URL original — usada
+/// para exibir a miniatura no PDF e, ao mesmo tempo, torná-la clicável
+/// (abre a imagem completa no navegador ao clicar).
+class _ImagemLancamento {
+  final pw.MemoryImage imagem;
+  final String url;
+
+  const _ImagemLancamento({required this.imagem, required this.url});
+}
+
+/// Baixa as imagens anexadas aos [lancamentos] (quando houver) e devolve
+/// um mapa `id do lançamento -> _ImagemLancamento` pronto para uso na
+/// tabela do relatório. Lançamentos sem imagem, ou cuja imagem falhe ao
+/// baixar (servidor fora do ar, arquivo removido, etc.), simplesmente não
+/// entram no mapa — a tabela mostra "-" nesses casos, sem quebrar a
+/// geração do PDF.
+Future<Map<int, _ImagemLancamento>> _carregarImagensLancamentos(
+  List<LancamentoBonus> lancamentos,
+) async {
+  final imagens = <int, _ImagemLancamento>{};
+
+  for (final lancamento in lancamentos) {
+    final url = lancamento.imagemUrl;
+    if (url == null) continue;
+
+    try {
+      final res = await http.get(Uri.parse(url)).timeout(
+            const Duration(seconds: 10),
+          );
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        imagens[lancamento.id] = _ImagemLancamento(
+          imagem: pw.MemoryImage(res.bodyBytes),
+          url: url,
+        );
+      }
+    } catch (_) {
+      // Ignora silenciosamente — a miniatura só não aparece para este
+      // lançamento específico.
+    }
+  }
+
+  return imagens;
 }
 
 Future<void> _salvarEAbrir(pw.Document doc, String nomeArquivo) async {
@@ -555,6 +599,7 @@ pw.MultiPage _paginaEstatisticas({
         )
       else
         pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.center,
           crossAxisAlignment: pw.CrossAxisAlignment.center,
           children: [
             pw.SizedBox(
@@ -571,52 +616,51 @@ pw.MultiPage _paginaEstatisticas({
                 ),
               ),
             ),
-            pw.SizedBox(width: 16),
+            pw.SizedBox(width: 24),
             // Legenda ao lado da pizza (em vez de abaixo), economizando
-            // altura vertical na página.
-            pw.Expanded(
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  for (int i = 0; i < ordenado.length; i++)
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.only(bottom: 3),
-                      child: pw.Row(
-                        mainAxisSize: pw.MainAxisSize.min,
-                        children: [
-                          pw.Container(
-                            width: 8,
-                            height: 8,
-                            decoration: pw.BoxDecoration(
-                              color:
-                                  _paletaGrafico[i % _paletaGrafico.length],
-                              borderRadius: const pw.BorderRadius.all(
-                                  pw.Radius.circular(2)),
-                            ),
+            // altura vertical na página. Cada item fica compacto — nome
+            // e percentual ficam colados, em vez de esticados pela
+            // largura toda da coluna (o que afastava demais os dois
+            // quando o nome do motivo era curto).
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              mainAxisSize: pw.MainAxisSize.min,
+              children: [
+                for (int i = 0; i < ordenado.length; i++)
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.only(bottom: 4),
+                    child: pw.Row(
+                      mainAxisSize: pw.MainAxisSize.min,
+                      children: [
+                        pw.Container(
+                          width: 8,
+                          height: 8,
+                          decoration: pw.BoxDecoration(
+                            color: _paletaGrafico[i % _paletaGrafico.length],
+                            borderRadius: const pw.BorderRadius.all(
+                                pw.Radius.circular(2)),
                           ),
-                          pw.SizedBox(width: 6),
-                          pw.Expanded(
-                            child: pw.Text(
-                              ordenado[i].motivoNome,
-                              style: const pw.TextStyle(
-                                  fontSize: 8.5, color: _cinzaTexto),
-                            ),
+                        ),
+                        pw.SizedBox(width: 6),
+                        pw.Text(
+                          ordenado[i].motivoNome,
+                          style: const pw.TextStyle(
+                              fontSize: 8.5, color: _cinzaTexto),
+                        ),
+                        pw.SizedBox(width: 6),
+                        pw.Text(
+                          '${(ordenado[i].total / totalGeral * 100).toStringAsFixed(1)}% '
+                          '(${ordenado[i].total})',
+                          style: const pw.TextStyle(
+                            fontSize: 8.5,
+                            fontWeight: pw.FontWeight.bold,
+                            color: _cinzaTexto,
                           ),
-                          pw.SizedBox(width: 6),
-                          pw.Text(
-                            '${(ordenado[i].total / totalGeral * 100).toStringAsFixed(1)}% '
-                            '(${ordenado[i].total})',
-                            style: const pw.TextStyle(
-                              fontSize: 8.5,
-                              fontWeight: pw.FontWeight.bold,
-                              color: _cinzaTexto,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
           ],
         ),
@@ -740,7 +784,8 @@ pw.MultiPage _paginaEstatisticas({
 /// estourar a página quando há muitos colaboradores.
 pw.Widget _blocoRankingColaboradores(List<_RankingColaborador> ranking) {
   final top = ranking.take(10).toList();
-  final maiorTotal = top.first.total == 0 ? 1 : top.first.total;
+  final maiorQuantidade =
+      top.first.quantidade == 0 ? 1 : top.first.quantidade;
 
   // Largura total (em pontos) disponível para a barra em si — a coluna
   // de barra tem largura fixa (ver `pw.SizedBox(width: _larguraBarraMax)`
@@ -802,7 +847,7 @@ pw.Widget _blocoRankingColaboradores(List<_RankingColaborador> ranking) {
                       ),
                     ),
                     pw.Container(
-                      width: larguraBarraMax * (top[i].total / maiorTotal),
+                      width: larguraBarraMax * (top[i].quantidade / maiorQuantidade),
                       height: 8,
                       decoration: const pw.BoxDecoration(
                         color: _laranja,
@@ -1022,7 +1067,7 @@ pw.Widget _blocoResumoMotivos(List<ResumoMotivo> resumoMotivos) {
 /// seção do relatório geral, garantindo layout idêntico e que as páginas
 /// de um colaborador nunca contenham dados de outro — cada chamada monta
 /// um [pw.MultiPage] independente, fechado sobre os dados passados.
-pw.Page _paginaColaborador({
+Future<pw.Page> _paginaColaborador({
   required Colaborador colaborador,
   required int mes,
   required int ano,
@@ -1031,9 +1076,13 @@ pw.Page _paginaColaborador({
   required Bonus? bonus,
   required pw.MemoryImage logoImage,
   List<ResumoMotivo> resumoMotivos = const [],
-}) {
+}) async {
   final ordenados = [...lancamentos]
     ..sort((a, b) => a.criadoEm.compareTo(b.criadoEm));
+
+  // Baixa (uma única vez) as imagens anexadas às penalidades deste
+  // colaborador, para exibir uma miniatura na tabela.
+  final imagensPorLancamento = await _carregarImagensLancamentos(ordenados);
 
   final totalPenalidades =
       ordenados.fold<int>(0, (soma, l) => soma + l.pontos.abs());
@@ -1254,26 +1303,28 @@ pw.Page _paginaColaborador({
           pw.Table(
             border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
             columnWidths: {
-              0: const pw.FlexColumnWidth(2.1),
-              1: const pw.FlexColumnWidth(1.0),
-              2: const pw.FlexColumnWidth(0.8),
-              3: const pw.FlexColumnWidth(1.5),
-              4: const pw.FlexColumnWidth(2.2),
-              5: const pw.FlexColumnWidth(1.4),
+              0: const pw.FlexColumnWidth(1.2), // Categoria
+              1: const pw.FlexColumnWidth(1.5), // Subcategoria
+              2: const pw.FlexColumnWidth(1.0), // Data
+              3: const pw.FlexColumnWidth(0.7), // Pontos
+              4: const pw.FlexColumnWidth(1.3), // Motivo
+              5: const pw.FlexColumnWidth(0.85), // OS
+              6: const pw.FlexColumnWidth(1.9), // Observação
+              7: const pw.FlexColumnWidth(1.6), // Imagem
             },
             children: [
               pw.TableRow(
                 decoration: const pw.BoxDecoration(color: _laranja),
                 children: [
-                  _celulaCabecalho('Categoria / Subcategoria',
+                  _celulaCabecalho('Categoria', textAlign: pw.TextAlign.center),
+                  _celulaCabecalho('Subcategoria',
                       textAlign: pw.TextAlign.center),
                   _celulaCabecalho('Data', textAlign: pw.TextAlign.center),
                   _celulaCabecalho('Pontos', textAlign: pw.TextAlign.center),
                   _celulaCabecalho('Motivo', textAlign: pw.TextAlign.center),
-                  _celulaCabecalho('Observação / OS',
-                      textAlign: pw.TextAlign.center),
-                  _celulaCabecalho('Lançado por',
-                      textAlign: pw.TextAlign.center),
+                  _celulaCabecalho('OS', textAlign: pw.TextAlign.center),
+                  _celulaCabecalho('Observação', textAlign: pw.TextAlign.center),
+                  _celulaCabecalho('Imagem', textAlign: pw.TextAlign.center),
                 ],
               ),
               for (int i = 0; i < ordenados.length; i++)
@@ -1284,9 +1335,15 @@ pw.Page _paginaColaborador({
                   children: [
                     _celula(
                       ordenados[i].subcategoriaId == null
-                          ? 'Penalidade avulsa'
-                          : '${ordenados[i].categoriaNome}\n${ordenados[i].subcategoriaDesc}',
+                          ? 'Avulsa'
+                          : (ordenados[i].categoriaNome ?? '-'),
                       negrito: true,
+                      textAlign: pw.TextAlign.center,
+                    ),
+                    _celula(
+                      ordenados[i].subcategoriaId == null
+                          ? '-'
+                          : (ordenados[i].subcategoriaDesc ?? '-'),
                       textAlign: pw.TextAlign.center,
                     ),
                     _celula(
@@ -1304,13 +1361,16 @@ pw.Page _paginaColaborador({
                       textAlign: pw.TextAlign.center,
                     ),
                     _celula(
-                      'OS: ${ordenados[i].os}\n${ordenados[i].observacao}',
+                      ordenados[i].os.isEmpty ? '-' : ordenados[i].os,
                       textAlign: pw.TextAlign.center,
                     ),
                     _celula(
-                      ordenados[i].usuarioNome,
+                      ordenados[i].observacao.isEmpty
+                          ? '-'
+                          : ordenados[i].observacao,
                       textAlign: pw.TextAlign.center,
                     ),
+                    _celulaImagem(imagensPorLancamento[ordenados[i].id]),
                   ],
                 ),
             ],
@@ -1346,14 +1406,46 @@ String _formatarMoeda(double valor) {
 
 pw.Widget _celulaCabecalho(String texto, {pw.TextAlign? textAlign}) {
   return pw.Padding(
-    padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+    padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 6),
     child: pw.Text(
       texto,
       textAlign: textAlign,
+      softWrap: true,
       style: const pw.TextStyle(
-        fontSize: 9,
+        fontSize: 7.5,
         fontWeight: pw.FontWeight.bold,
         color: PdfColors.white,
+      ),
+    ),
+  );
+}
+
+/// Célula da tabela que exibe a miniatura da imagem anexada ao
+/// lançamento (quando houver), clicável — ao tocar/clicar, abre a
+/// imagem original em tamanho completo no navegador. Sem imagem, mostra
+/// o mesmo "-" usado nas demais colunas, mantendo a tabela consistente.
+pw.Widget _celulaImagem(_ImagemLancamento? dados) {
+  if (dados == null) {
+    return _celula('-', textAlign: pw.TextAlign.center);
+  }
+
+  return pw.Padding(
+    padding: const pw.EdgeInsets.all(4),
+    child: pw.Center(
+      child: pw.UrlLink(
+        destination: dados.url,
+        child: pw.ClipRRect(
+          horizontalRadius: 4,
+          verticalRadius: 4,
+          child: pw.Container(
+            width: 70,
+            height: 70,
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: PdfColors.grey400, width: 0.5),
+            ),
+            child: pw.Image(dados.imagem, fit: pw.BoxFit.cover),
+          ),
+        ),
       ),
     ),
   );
@@ -1366,12 +1458,13 @@ pw.Widget _celula(
   pw.TextAlign? textAlign,
 }) {
   return pw.Padding(
-    padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+    padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 6),
     child: pw.Text(
       texto,
       textAlign: textAlign,
+      softWrap: true,
       style: pw.TextStyle(
-        fontSize: 8.5,
+        fontSize: 7.5,
         color: cor ?? const PdfColor.fromInt(0xFF1A1A1A),
         fontWeight: negrito ? pw.FontWeight.bold : pw.FontWeight.normal,
       ),

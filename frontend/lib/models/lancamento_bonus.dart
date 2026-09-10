@@ -1,3 +1,5 @@
+import '../config/api_config.dart';
+
 class LancamentoBonus {
   final int id;
   final int colaboradorId;
@@ -25,9 +27,11 @@ class LancamentoBonus {
 
   /// URL completa da imagem anexada (quando houver), pronta para uso em
   /// Image.network. Null quando o lançamento não tem imagem.
-  String? get imagemUrl => imagemPath != null
-      ? 'https://visualpremium.com.br/api/$imagemPath'
-      : null;
+  ///
+  /// Usa [ApiConfig.baseUrl] (lido do .env) em vez de URL fixa, para que
+  /// aponte corretamente tanto em produção quanto no ambiente local.
+  String? get imagemUrl =>
+      imagemPath != null ? '${ApiConfig.baseUrl}/$imagemPath' : null;
 
   LancamentoBonus({
     required this.id,

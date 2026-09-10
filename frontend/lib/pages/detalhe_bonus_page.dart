@@ -427,12 +427,19 @@ class _DetalheBonusPageState extends State<DetalheBonusPage> {
     final pontos = int.parse(pontosCtrl.text);
     final valor = double.parse(valorCtrl.text.replaceAll(',', '.'));
 
+    // ignore: avoid_print
+    print('DEBUG _novaFaixa: bonusId=${bonus.id} pontos=$pontos valor=$valor token=$_token');
+
     final erro = await _provider.criarFaixa(
       token: _token!,
       bonusId: bonus.id,
       pontos: pontos,
       valor: valor,
     );
+
+    // ignore: avoid_print
+    print('DEBUG _novaFaixa: erro=$erro');
+
     if (mounted && erro != null) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(erro)));

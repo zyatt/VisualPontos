@@ -7,6 +7,7 @@ import '../models/subcategoria_bonus.dart';
 import '../models/observacao_bonus.dart';
 import '../models/item_observacao_bonus.dart';
 import '../models/faixa_bonus.dart';
+import '../config/api_config.dart';
 
 class BonusResponse {
   final bool success;
@@ -35,7 +36,8 @@ class BonusResponse {
 }
 
 class BonusService {
-  static const String _base = 'https://visualpremium.com.br/api';
+  // URL base lida do .env (ApiConfig.baseUrl / API_BASE_URL).
+  static String get _base => ApiConfig.baseUrl;
 
   Map<String, String> _headers(String token) => {
         'Content-Type': 'application/json',
@@ -566,6 +568,8 @@ class BonusService {
     required double valor,
   }) async {
     try {
+      // ignore: avoid_print
+      print('DEBUG criarFaixa: URL=$_base/bonus.php?recurso=faixa body={bonus_id:$bonusId, pontos:$pontos, valor:$valor}');
       final res = await http
           .post(Uri.parse('$_base/bonus.php?recurso=faixa'),
               headers: _headers(token),
@@ -575,7 +579,8 @@ class BonusService {
                 'valor': valor,
               }))
           .timeout(const Duration(seconds: 15));
-      developer.log('[BonusService.criarFaixa] status=${res.statusCode} body=${res.body}');
+      // ignore: avoid_print
+      print('DEBUG criarFaixa: status=${res.statusCode} body=${res.body}');
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       if (res.statusCode == 200 && data['success'] == true) {
         return BonusResponse(
@@ -586,7 +591,10 @@ class BonusService {
           success: false,
           message: data['message'] as String? ?? 'Erro ao criar faixa');
     } catch (e, st) {
-      developer.log('[BonusService.criarFaixa] ERRO: $e\n$st');
+      // ignore: avoid_print
+      print('DEBUG criarFaixa ERRO: $e');
+      // ignore: avoid_print
+      print('DEBUG criarFaixa STACK: $st');
       return BonusResponse(
           success: false,
           message: 'Não foi possível conectar ao servidor. Verifique sua internet.');
