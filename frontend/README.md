@@ -1,3 +1,9 @@
-# visual_premium
+O arquivo gerado fica em:
 
-A new Flutter project.
+build/app/outputs/flutter-apk/app-release.apk No newline at end of file
+build/app/outputs/flutter-apk/app-release.apk
+
+------------------------------------
+para windows
+
+flutter build windows --release  No newline at end of file
