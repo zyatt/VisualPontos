@@ -20,6 +20,9 @@ class LancamentoBonusResponse {
   final OsRecente? osRecente;
   // Preenchido apenas pelo upload de imagem.
   final String? imagemPath;
+  // Preenchido apenas pelo lançamento: quantos colaboradores extras
+  // ("incluir colaborador") também receberam a penalidade com sucesso.
+  final int extrasLancados;
 
   LancamentoBonusResponse({
     required this.success,
@@ -34,7 +37,34 @@ class LancamentoBonusResponse {
     this.osEncontrada = false,
     this.osRecente,
     this.imagemPath,
+    this.extrasLancados = 0,
   });
+}
+
+/// Um colaborador incluído junto com o principal em um lançamento de
+/// penalidade ("incluir colaborador"). Recebe o mesmo motivo/observação/
+/// OS/imagens do lançamento principal, mas com sua própria categoria/
+/// subcategoria do catálogo — ou, se ele não tiver bônus vinculado ou o
+/// usuário preferir, pontos avulsos.
+///
+/// Informe [subcategoriaId] (penalidade do catálogo) OU [pontos]
+/// (penalidade avulsa), nunca os dois.
+class ColaboradorExtraPenalidade {
+  final int colaboradorId;
+  final int? subcategoriaId;
+  final int? pontos;
+
+  const ColaboradorExtraPenalidade({
+    required this.colaboradorId,
+    this.subcategoriaId,
+    this.pontos,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'colaborador_id': colaboradorId,
+        if (subcategoriaId != null) 'subcategoria_id': subcategoriaId,
+        if (pontos != null) 'pontos': pontos,
+      };
 }
 
 /// Dados do lançamento anterior encontrado com a mesma OS (últimas 24h).
@@ -314,8 +344,14 @@ class LancamentoBonusService {
   /// partir da subcategoria). Para uma penalidade AVULSA (sem categoria
   /// do catálogo), omita [subcategoriaId] e informe [pontos] diretamente.
   ///
-  /// [imagemPath] é o caminho relativo já retornado por [uploadImagem]
-  /// (opcional — omita quando não há imagem anexada).
+  /// [imagensPaths] são os caminhos relativos já retornados por
+  /// [uploadImagem] para cada imagem anexada (opcional — omita ou passe
+  /// uma lista vazia quando não há imagens).
+  ///
+  /// [colaboradoresExtras] são outros colaboradores incluídos junto com o
+  /// principal ("incluir colaborador") — recebem o mesmo motivo/
+  /// observação/OS/imagens, cada um com sua própria categoria/subcategoria
+  /// (ou pontos avulsos).
   Future<LancamentoBonusResponse> lancar({
     required String token,
     required int colaboradorId,
@@ -324,7 +360,8 @@ class LancamentoBonusService {
     required int motivoId,
     required String observacao,
     required String os,
-    String? imagemPath,
+    List<String>? imagensPaths,
+    List<ColaboradorExtraPenalidade>? colaboradoresExtras,
   }) async {
     assert(
       subcategoriaId != null || pontos != null,
@@ -342,7 +379,11 @@ class LancamentoBonusService {
               'motivo_id': motivoId,
               'observacao': observacao,
               'os': os,
-              if (imagemPath != null) 'imagem_path': imagemPath,
+              if (imagensPaths != null && imagensPaths.isNotEmpty)
+                'imagens_paths': imagensPaths,
+              if (colaboradoresExtras != null && colaboradoresExtras.isNotEmpty)
+                'colaboradores_extras':
+                    colaboradoresExtras.map((e) => e.toJson()).toList(),
             }),
           )
           .timeout(const Duration(seconds: 15));
@@ -350,6 +391,7 @@ class LancamentoBonusService {
       final data = jsonDecode(res.body) as Map<String, dynamic>;
 
       if (res.statusCode == 200 && data['success'] == true) {
+        final extras = data['colaboradores_extras'] as List?;
         return LancamentoBonusResponse(
           success: true,
           lancamento:
@@ -358,6 +400,7 @@ class LancamentoBonusService {
           percentualAtual: (data['percentual_atual'] as num?)?.toDouble(),
           faixaPercentual: (data['faixa_percentual'] as num?)?.toDouble(),
           valorBonus: (data['valor_bonus'] as num?)?.toDouble(),
+          extrasLancados: extras?.length ?? 0,
         );
       }
       return LancamentoBonusResponse(

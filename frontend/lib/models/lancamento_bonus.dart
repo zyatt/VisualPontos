@@ -15,9 +15,9 @@ class LancamentoBonus {
   final int pontos; // sempre negativo
   final String observacao;
   final String os;
-  // Caminho relativo (ex.: "uploads/lancamentos_bonus/xxx.jpg") de uma
-  // imagem opcional anexada ao lançamento. Null quando não há anexo.
-  final String? imagemPath;
+  // Caminhos relativos (ex.: "uploads/lancamentos_bonus/xxx.jpg") das
+  // imagens anexadas ao lançamento. Lista vazia quando não há anexos.
+  final List<String> imagens;
   final int usuarioId;
   final String usuarioNome;
   final DateTime criadoEm;
@@ -25,13 +25,13 @@ class LancamentoBonus {
   /// true quando o lançamento não veio de uma subcategoria do catálogo.
   bool get ehAvulsa => subcategoriaId == null;
 
-  /// URL completa da imagem anexada (quando houver), pronta para uso em
-  /// Image.network. Null quando o lançamento não tem imagem.
+  /// URLs completas das imagens anexadas, prontas para uso em
+  /// Image.network. Lista vazia quando o lançamento não tem imagens.
   ///
   /// Usa [ApiConfig.baseUrl] (lido do .env) em vez de URL fixa, para que
   /// aponte corretamente tanto em produção quanto no ambiente local.
-  String? get imagemUrl =>
-      imagemPath != null ? '${ApiConfig.baseUrl}/$imagemPath' : null;
+  List<String> get imagensUrl =>
+      imagens.map((path) => '${ApiConfig.baseUrl}/$path').toList();
 
   LancamentoBonus({
     required this.id,
@@ -46,13 +46,23 @@ class LancamentoBonus {
     required this.pontos,
     required this.observacao,
     required this.os,
-    this.imagemPath,
+    this.imagens = const [],
     required this.usuarioId,
     required this.usuarioNome,
     required this.criadoEm,
   });
 
   factory LancamentoBonus.fromJson(Map<String, dynamic> json) {
+    // O backend retorna `imagens` (lista) desde a migração multi-imagem.
+    // Mantemos leitura do campo antigo `imagem_path` (string única) como
+    // fallback, para não quebrar contra uma API ainda não atualizada.
+    final imagensJson = json['imagens'] as List?;
+    final imagens = imagensJson != null
+        ? imagensJson.map((e) => e as String).toList()
+        : (json['imagem_path'] != null
+            ? [json['imagem_path'] as String]
+            : <String>[]);
+
     return LancamentoBonus(
       id: json['id'] as int,
       colaboradorId: json['colaborador_id'] as int,
@@ -66,7 +76,7 @@ class LancamentoBonus {
       pontos: json['pontos'] as int,
       observacao: json['observacao'] as String? ?? '',
       os: json['os'] as String? ?? '',
-      imagemPath: json['imagem_path'] as String?,
+      imagens: imagens,
       usuarioId: json['usuario_id'] as int,
       usuarioNome: json['usuario_nome'] as String? ?? '',
       // formato "YYYY-MM-DD HH:MM:SS" vindo do MySQL

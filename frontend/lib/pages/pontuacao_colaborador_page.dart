@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../models/colaborador.dart';
 import 'visao_geral_page.dart' show HistoricoPenalidadesArgs;
+import '../models/bonus.dart';
 import '../models/categoria_bonus.dart';
 import '../models/lancamento_bonus.dart';
 import '../models/subcategoria_bonus.dart';
@@ -17,12 +18,13 @@ import '../models/motivo_bonus.dart';
 import '../providers/bonus_provider.dart';
 import '../providers/colaborador_provider.dart';
 import '../providers/lancamento_bonus_provider.dart';
+import '../services/lancamento_bonus_service.dart' show ColaboradorExtraPenalidade;
 import '../providers/motivo_bonus_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/relatorio_penalidades_pdf.dart';
 import '../utils/seletor_mes_ano_relatorio.dart';
-import '../widgets/visualizador_imagem_lancamento.dart';
+import '../widgets/faixa_imagens_lancamento.dart';
 
 /// Página aberta ao tocar em um colaborador na listagem.
 /// Mostra o saldo de pontos do mês (começa em 100) e todas as
@@ -140,6 +142,65 @@ class _PontuacaoColaboradorPageState extends State<PontuacaoColaboradorPage> {
     if (mounted) setState(() => _prontoParaExibir = true);
   }
 
+  /// Envia cada imagem anexada (uma por vez, já que o endpoint de upload
+  /// só aceita um arquivo por requisição) e retorna a lista de caminhos
+  /// relativos devolvidos pelo servidor. Se alguma falhar, pergunta ao
+  /// usuário se deseja prosseguir sem as imagens que não foram enviadas;
+  /// retorna `null` se ele optar por cancelar o lançamento.
+  Future<List<String>?> _uploadImagens({
+    required String token,
+    required List<File> imagens,
+  }) async {
+    if (imagens.isEmpty) return [];
+
+    final caminhos = <String>[];
+    var houveFalha = false;
+
+    for (final arquivo in imagens) {
+      final caminho = await context.read<LancamentoBonusProvider>().uploadImagem(
+            token: token,
+            arquivo: arquivo,
+          );
+      if (!mounted) return null;
+      if (caminho != null) {
+        caminhos.add(caminho);
+      } else {
+        houveFalha = true;
+      }
+    }
+
+    if (houveFalha) {
+      final prosseguir = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Falha ao enviar imagem'),
+              content: Text(
+                caminhos.isEmpty
+                    ? 'Não foi possível enviar as imagens anexadas. Deseja '
+                        'lançar a penalidade mesmo assim, sem as imagens?'
+                    : 'Uma ou mais imagens não puderam ser enviadas. Deseja '
+                        'lançar a penalidade apenas com as imagens que '
+                        'foram enviadas com sucesso?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text('Lançar assim mesmo'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+      if (!prosseguir || !mounted) return null;
+    }
+
+    return caminhos;
+  }
+
   Future<void> _selecionarSubcategoria(
     CategoriaBonus categoria,
     SubcategoriaBonus sub,
@@ -161,38 +222,11 @@ class _PontuacaoColaboradorPageState extends State<PontuacaoColaboradorPage> {
 
     if (resultado == null || !mounted) return;
 
-    String? imagemPath;
-    if (resultado.imagemArquivo != null) {
-      imagemPath = await context.read<LancamentoBonusProvider>().uploadImagem(
-            token: token,
-            arquivo: resultado.imagemArquivo!,
-          );
-      if (!mounted) return;
-      if (imagemPath == null) {
-        final prosseguirSemImagem = await showDialog<bool>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: const Text('Falha ao enviar imagem'),
-                content: const Text(
-                  'Não foi possível enviar a imagem anexada. Deseja lançar '
-                  'a penalidade mesmo assim, sem a imagem?',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(false),
-                    child: const Text('Cancelar'),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.of(ctx).pop(true),
-                    child: const Text('Lançar sem imagem'),
-                  ),
-                ],
-              ),
-            ) ??
-            false;
-        if (!prosseguirSemImagem || !mounted) return;
-      }
-    }
+    final imagensPaths = await _uploadImagens(
+      token: token,
+      imagens: resultado.imagens,
+    );
+    if (imagensPaths == null || !mounted) return; // usuário cancelou
 
     final erro =
         await context.read<LancamentoBonusProvider>().lancarPenalidade(
@@ -202,7 +236,10 @@ class _PontuacaoColaboradorPageState extends State<PontuacaoColaboradorPage> {
               motivoId: resultado.motivoId,
               observacao: resultado.observacao,
               os: resultado.os,
-              imagemPath: imagemPath,
+              imagensPaths: imagensPaths,
+              colaboradoresExtras: resultado.colaboradoresExtras
+                  .map((e) => e.toPayload())
+                  .toList(),
             );
 
     if (!mounted) return;
@@ -210,10 +247,13 @@ class _PontuacaoColaboradorPageState extends State<PontuacaoColaboradorPage> {
     if (erro != null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erro)));
     } else {
+      final totalExtras = resultado.colaboradoresExtras.length;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Penalidade de ${sub.pontos} pontos lançada para "${sub.descricao}"',
+            totalExtras == 0
+                ? 'Penalidade de ${sub.pontos} pontos lançada para "${sub.descricao}"'
+                : 'Penalidade lançada para ${1 + totalExtras} colaboradores',
           ),
         ),
       );
@@ -239,38 +279,11 @@ class _PontuacaoColaboradorPageState extends State<PontuacaoColaboradorPage> {
 
     if (resultado == null || !mounted) return;
 
-    String? imagemPath;
-    if (resultado.imagemArquivo != null) {
-      imagemPath = await context.read<LancamentoBonusProvider>().uploadImagem(
-            token: token,
-            arquivo: resultado.imagemArquivo!,
-          );
-      if (!mounted) return;
-      if (imagemPath == null) {
-        final prosseguirSemImagem = await showDialog<bool>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: const Text('Falha ao enviar imagem'),
-                content: const Text(
-                  'Não foi possível enviar a imagem anexada. Deseja lançar '
-                  'a penalidade mesmo assim, sem a imagem?',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(false),
-                    child: const Text('Cancelar'),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.of(ctx).pop(true),
-                    child: const Text('Lançar sem imagem'),
-                  ),
-                ],
-              ),
-            ) ??
-            false;
-        if (!prosseguirSemImagem || !mounted) return;
-      }
-    }
+    final imagensPaths = await _uploadImagens(
+      token: token,
+      imagens: resultado.imagens,
+    );
+    if (imagensPaths == null || !mounted) return; // usuário cancelou
 
     final erro = await context.read<LancamentoBonusProvider>().lancarPenalidade(
           token: token,
@@ -279,7 +292,10 @@ class _PontuacaoColaboradorPageState extends State<PontuacaoColaboradorPage> {
           motivoId: resultado.motivoId,
           observacao: resultado.observacao,
           os: resultado.os,
-          imagemPath: imagemPath,
+          imagensPaths: imagensPaths,
+          colaboradoresExtras: resultado.colaboradoresExtras
+              .map((e) => e.toPayload())
+              .toList(),
         );
 
     if (!mounted) return;
@@ -287,9 +303,14 @@ class _PontuacaoColaboradorPageState extends State<PontuacaoColaboradorPage> {
     if (erro != null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erro)));
     } else {
+      final totalExtras = resultado.colaboradoresExtras.length;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Penalidade avulsa de ${resultado.pontos} pontos lançada'),
+          content: Text(
+            totalExtras == 0
+                ? 'Penalidade avulsa de ${resultado.pontos} pontos lançada'
+                : 'Penalidade lançada para ${1 + totalExtras} colaboradores',
+          ),
         ),
       );
     }
@@ -1034,10 +1055,21 @@ class _PenalidadeRecenteTileState extends State<_PenalidadeRecenteTile> {
                     ],
                   ),
                 ),
-                if (lancamento.imagemUrl != null) ...[
+                if (lancamento.imagens.isNotEmpty) ...[
                   const SizedBox(width: 8),
                   Icon(Icons.image_outlined,
                       size: 16, color: scheme.onSurfaceVariant),
+                  if (lancamento.imagens.length > 1) ...[
+                    const SizedBox(width: 2),
+                    Text(
+                      '${lancamento.imagens.length}',
+                      style: GoogleFonts.nunito(
+                        fontSize: 11,
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ],
                 const SizedBox(width: 8),
                 Container(
@@ -1077,7 +1109,7 @@ void _abrirDetalheLancamento(BuildContext context, LancamentoBonus lancamento) {
   showDialog(
     context: context,
     builder: (ctx) {
-      final scheme = Theme.of(ctx).colorScheme;
+      Theme.of(ctx).colorScheme;
       return Dialog(
         insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
         child: ConstrainedBox(
@@ -1118,43 +1150,10 @@ void _abrirDetalheLancamento(BuildContext context, LancamentoBonus lancamento) {
                   ],
                 ),
                 const SizedBox(height: 16),
-                if (lancamento.imagemUrl != null) ...[
-                  GestureDetector(
-                    onTap: () => abrirImagemEmTelaCheia(
-                        ctx, lancamento.imagemUrl!),
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          lancamento.imagemUrl!,
-                          height: 160,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                          loadingBuilder: (context, child, progress) {
-                            if (progress == null) return child;
-                            return Container(
-                              height: 160,
-                              alignment: Alignment.center,
-                              color: scheme.surfaceContainerHighest,
-                              child: const SizedBox(
-                                width: 22,
-                                height: 22,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                            );
-                          },
-                          errorBuilder: (context, error, stack) => Container(
-                            height: 160,
-                            alignment: Alignment.center,
-                            color: scheme.surfaceContainerHighest,
-                            child: Icon(Icons.broken_image_outlined,
-                                color: scheme.onSurfaceVariant),
-                          ),
-                        ),
-                      ),
-                    ),
+                if (lancamento.imagens.isNotEmpty) ...[
+                  FaixaImagensLancamento(
+                    imagensUrl: lancamento.imagensUrl,
+                    altura: 160,
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -1406,12 +1405,14 @@ class _DialogPenalidadeResultado {
   final int motivoId;
   final String observacao;
   final String os;
-  final File? imagemArquivo;
+  final List<File> imagens;
+  final List<_ColaboradorExtraSelecionado> colaboradoresExtras;
   const _DialogPenalidadeResultado({
     required this.motivoId,
     required this.observacao,
     required this.os,
-    this.imagemArquivo,
+    this.imagens = const [],
+    this.colaboradoresExtras = const [],
   });
 }
 
@@ -1476,81 +1477,617 @@ Future<File?> _escolherOrigemImagem(BuildContext context) {
   );
 }
 
-/// Campo reutilizável de anexo de imagem: mostra um botão para adicionar
-/// quando vazio, ou uma miniatura com botão de remover quando já há uma
-/// imagem escolhida.
-class _CampoImagemAnexo extends StatelessWidget {
-  final File? imagem;
-  final ValueChanged<File?> onChanged;
+/// Quantidade máxima de imagens que podem ser anexadas a uma penalidade.
+const int _maxImagensAnexo = 4;
 
-  const _CampoImagemAnexo({
-    required this.imagem,
+/// Campo reutilizável de anexo de imagens: mostra um botão para adicionar
+/// quando vazio (ou "Adicionar outra imagem" quando já há alguma), com
+/// miniaturas em grade e um botão de remover em cada uma. Permite anexar
+/// mais de uma imagem (até [_maxImagensAnexo]).
+class _CampoImagensAnexo extends StatelessWidget {
+  final List<File> imagens;
+  final ValueChanged<List<File>> onChanged;
+  // Widget opcional renderizado ao lado do botão de anexar imagem (ex.:
+  // botão "Incluir colaborador"), formando a linha de 2 botões abaixo do
+  // campo de observação.
+  final Widget? botaoExtra;
+
+  const _CampoImagensAnexo({
+    required this.imagens,
     required this.onChanged,
+    this.botaoExtra,
   });
 
-  Future<void> _selecionar(BuildContext context) async {
+  Future<void> _adicionar(BuildContext context) async {
     final arquivo = await _escolherOrigemImagem(context);
     if (arquivo != null) {
-      onChanged(arquivo);
+      onChanged([...imagens, arquivo]);
     }
+  }
+
+  void _remover(int index) {
+    final novaLista = [...imagens]..removeAt(index);
+    onChanged(novaLista);
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final atingiuLimite = imagens.length >= _maxImagensAnexo;
 
-    if (imagem == null) {
-      return OutlinedButton.icon(
-        onPressed: () => _selecionar(context),
-        icon: const Icon(Icons.add_a_photo_outlined, size: 18),
-        label: const Text('Anexar imagem (opcional)'),
-        style: ButtonStyle(
-          mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
-          alignment: Alignment.centerLeft,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (imagens.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (var i = 0; i < imagens.length; i++)
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.file(
+                        imagens[i],
+                        width: 64,
+                        height: 64,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    Positioned(
+                      top: -6,
+                      right: -6,
+                      child: Tooltip(
+                        message: 'Remover imagem',
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _remover(i),
+                            child: Container(
+                              width: 22,
+                              height: 22,
+                              decoration: BoxDecoration(
+                                color: scheme.error,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: scheme.surface,
+                                  width: 2,
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.close_rounded,
+                                size: 13,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        if (imagens.isNotEmpty) const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            if (atingiuLimite)
+              Text(
+                'Limite de $_maxImagensAnexo imagens atingido',
+                style:
+                    GoogleFonts.nunito(fontSize: 12, color: scheme.onSurfaceVariant),
+              )
+            else
+              Tooltip(
+                message: imagens.isEmpty
+                    ? 'Anexar imagem (opcional)'
+                    : 'Adicionar outra imagem',
+                child: OutlinedButton.icon(
+                  onPressed: () => _adicionar(context),
+                  icon: const Icon(Icons.add_a_photo_outlined, size: 18),
+                  label: Text(
+                    imagens.isEmpty
+                        ? 'Anexar imagem (opcional)'
+                        : 'Adicionar outra imagem',
+                  ),
+                  style: ButtonStyle(
+                    mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                    alignment: Alignment.centerLeft,
+                  ),
+                ),
+              ),
+            if (botaoExtra != null) botaoExtra!,
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Um colaborador incluído junto com o principal em um lançamento de
+/// penalidade ("incluir colaborador"). Preenche [subcategoriaId] +
+/// [categoriaNome]/[subcategoriaDesc] quando veio do catálogo, ou apenas
+/// [pontos] quando é uma penalidade avulsa para esse colaborador.
+class _ColaboradorExtraSelecionado {
+  final int colaboradorId;
+  final String colaboradorNome;
+  final int? subcategoriaId;
+  final String? categoriaNome;
+  final String? subcategoriaDesc;
+  final int? pontos;
+
+  const _ColaboradorExtraSelecionado({
+    required this.colaboradorId,
+    required this.colaboradorNome,
+    this.subcategoriaId,
+    this.categoriaNome,
+    this.subcategoriaDesc,
+    this.pontos,
+  });
+
+  String get rotuloPenalidade => subcategoriaId != null
+      ? '$categoriaNome · $subcategoriaDesc'
+      : 'Avulsa · -$pontos pts';
+
+  ColaboradorExtraPenalidade toPayload() => ColaboradorExtraPenalidade(
+        colaboradorId: colaboradorId,
+        subcategoriaId: subcategoriaId,
+        pontos: subcategoriaId == null ? pontos : null,
+      );
+}
+
+/// "Chip" mostrando um colaborador incluído, com botão de remover.
+class _ChipColaboradorExtra extends StatelessWidget {
+  final _ColaboradorExtraSelecionado extra;
+  final VoidCallback onRemover;
+
+  const _ChipColaboradorExtra({
+    required this.extra,
+    required this.onRemover,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 260),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: scheme.outline.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.person_outline_rounded,
+                size: 14, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                '${extra.colaboradorNome} · ${extra.rotuloPenalidade}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    GoogleFonts.nunito(fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Tooltip(
+              message: 'Remover ${extra.colaboradorNome}',
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onRemover,
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(Icons.close_rounded,
+                        size: 14, color: scheme.onSurfaceVariant),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Abre o dialog de seleção de um colaborador extra + sua categoria/
+/// subcategoria (ou pontos avulsos), carregando a lista de colaboradores
+/// se ainda não estiver em cache. Retorna null se o usuário cancelar.
+Future<_ColaboradorExtraSelecionado?> _abrirDialogIncluirColaborador({
+  required BuildContext context,
+  required String token,
+  required int colaboradorPrincipalId,
+  required List<_ColaboradorExtraSelecionado> jaIncluidos,
+}) async {
+  final colaboradorProvider = context.read<ColaboradorProvider>();
+  if (colaboradorProvider.colaboradores.isEmpty) {
+    await colaboradorProvider.carregarColaboradores(token: token);
+  }
+  if (!context.mounted) return null;
+
+  final idsExcluidos = {
+    colaboradorPrincipalId,
+    ...jaIncluidos.map((e) => e.colaboradorId),
+  };
+  final disponiveis = colaboradorProvider.colaboradores
+      .where((c) => !idsExcluidos.contains(c.id))
+      .toList();
+
+  return showDialog<_ColaboradorExtraSelecionado>(
+    context: context,
+    builder: (_) => _DialogIncluirColaborador(
+      token: token,
+      colaboradoresDisponiveis: disponiveis,
+    ),
+  );
+}
+
+/// Dialog em 2 passos: (1) buscar/selecionar um colaborador, (2) escolher
+/// a categoria/subcategoria do bônus DAQUELE colaborador (que pode ser
+/// diferente do bônus do colaborador principal) — ou, se ele não tiver
+/// bônus vinculado, informar os pontos de uma penalidade avulsa.
+class _DialogIncluirColaborador extends StatefulWidget {
+  final String token;
+  final List<Colaborador> colaboradoresDisponiveis;
+
+  const _DialogIncluirColaborador({
+    required this.token,
+    required this.colaboradoresDisponiveis,
+  });
+
+  @override
+  State<_DialogIncluirColaborador> createState() =>
+      _DialogIncluirColaboradorState();
+}
+
+class _DialogIncluirColaboradorState
+    extends State<_DialogIncluirColaborador> {
+  Colaborador? _selecionado;
+  Bonus? _bonusDoSelecionado;
+  bool _carregandoBonus = false;
+  String _busca = '';
+  String _buscaCategoria = '';
+  final _pontosCtrl = TextEditingController();
+  final _formKeyAvulsa = GlobalKey<FormState>();
+
+  @override
+  void dispose() {
+    _pontosCtrl.dispose();
+    super.dispose();
+  }
+
+  List<Colaborador> get _filtrados {
+    final termo = _busca.trim().toLowerCase();
+    if (termo.isEmpty) return widget.colaboradoresDisponiveis;
+    return widget.colaboradoresDisponiveis
+        .where((c) => c.nome.toLowerCase().contains(termo))
+        .toList();
+  }
+
+  /// Mesma lógica de filtro usada na tela principal: mantém a categoria
+  /// inteira se o nome dela bater, ou só as subcategorias que baterem.
+  List<CategoriaBonus> _filtrarCategorias(List<CategoriaBonus> categorias) {
+    final termo = _buscaCategoria.trim().toLowerCase();
+    if (termo.isEmpty) return categorias;
+
+    final resultado = <CategoriaBonus>[];
+    for (final cat in categorias) {
+      final nomeCategoriaBate = cat.nome.toLowerCase().contains(termo);
+      if (nomeCategoriaBate) {
+        resultado.add(cat);
+        continue;
+      }
+
+      final subsQueBatem = cat.subcategorias
+          .where((sub) => sub.descricao.toLowerCase().contains(termo))
+          .toList();
+      if (subsQueBatem.isNotEmpty) {
+        resultado.add(cat.copyWith(subcategorias: subsQueBatem));
+      }
+    }
+    return resultado;
+  }
+
+  Future<void> _selecionarColaborador(Colaborador c) async {
+    setState(() {
+      _selecionado = c;
+      _bonusDoSelecionado = null;
+      _buscaCategoria = '';
+    });
+
+    // Sem bônus vinculado: não há categoria/subcategoria para buscar,
+    // o usuário vai informar pontos avulsos direto no passo 2.
+    if (c.bonusId == null) return;
+
+    setState(() => _carregandoBonus = true);
+    final bonus = await context.read<BonusProvider>().buscarBonusPontual(
+          token: widget.token,
+          id: c.bonusId!,
+        );
+    if (!mounted) return;
+    setState(() {
+      _bonusDoSelecionado = bonus;
+      _carregandoBonus = false;
+    });
+  }
+
+  void _confirmarSubcategoria(CategoriaBonus categoria, SubcategoriaBonus sub) {
+    Navigator.of(context).pop(
+      _ColaboradorExtraSelecionado(
+        colaboradorId: _selecionado!.id,
+        colaboradorNome: _selecionado!.nome,
+        subcategoriaId: sub.id,
+        categoriaNome: categoria.nome,
+        subcategoriaDesc: sub.descricao,
+      ),
+    );
+  }
+
+  void _confirmarAvulsa() {
+    if (!_formKeyAvulsa.currentState!.validate()) return;
+    Navigator.of(context).pop(
+      _ColaboradorExtraSelecionado(
+        colaboradorId: _selecionado!.id,
+        colaboradorNome: _selecionado!.nome,
+        pontos: int.parse(_pontosCtrl.text),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final maxDialogHeight = screenHeight - viewInsets.bottom - 80;
+    final selecionado = _selecionado;
+
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 420,
+          maxHeight: maxDialogHeight > 200 ? maxDialogHeight : 200,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppTheme.orange.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.group_add_outlined,
+                        color: AppTheme.orange, size: 18),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      selecionado == null
+                          ? 'Incluir colaborador'
+                          : selecionado.nome,
+                      style: GoogleFonts.raleway(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  if (selecionado != null)
+                    Tooltip(
+                      message: 'Trocar colaborador',
+                      child: IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        onPressed: () => setState(() {
+                          _selecionado = null;
+                          _bonusDoSelecionado = null;
+                          _buscaCategoria = '';
+                        }),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+                child: selecionado == null
+                    ? _buildSelecaoColaborador()
+                    : _buildSelecaoPenalidade(scheme, selecionado),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: scheme.outline.withValues(alpha: 0.3)),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Tooltip(
+                    message: 'Cancelar',
+                    child: TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: ButtonStyle(
+                        mouseCursor:
+                            WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                      child: const Text('Cancelar'),
+                    ),
+                  ),
+                  if (selecionado != null && selecionado.bonusId == null) ...[
+                    const SizedBox(width: 8),
+                    Tooltip(
+                      message: 'Incluir colaborador',
+                      child: FilledButton(
+                        style: ButtonStyle(
+                          mouseCursor:
+                              WidgetStateProperty.all(SystemMouseCursors.click),
+                        ),
+                        onPressed: _confirmarAvulsa,
+                        child: const Text('Incluir'),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelecaoColaborador() {
+    final filtrados = _filtrados;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          onChanged: (v) => setState(() => _busca = v),
+          decoration: const InputDecoration(
+            hintText: 'Buscar colaborador',
+            prefixIcon: Icon(Icons.search_rounded, size: 18),
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (filtrados.isEmpty)
+          const _EstadoVazio(
+            icon: Icons.person_search_rounded,
+            mensagem: 'Nenhum colaborador disponível para incluir.',
+          )
+        else
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 320),
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: filtrados.length,
+              itemBuilder: (context, i) {
+                final c = filtrados[i];
+                return ListTile(
+                  onTap: () => _selecionarColaborador(c),
+                  mouseCursor: SystemMouseCursors.click,
+                  title: Text(
+                    c.nome,
+                    style: GoogleFonts.nunito(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(c.setor, style: GoogleFonts.nunito(fontSize: 12)),
+                );
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildSelecaoPenalidade(ColorScheme scheme, Colaborador selecionado) {
+    if (selecionado.bonusId == null) {
+      return Form(
+        key: _formKeyAvulsa,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Este colaborador não tem bônus vinculado. Informe os pontos '
+              'da penalidade avulsa para ele.',
+              style: GoogleFonts.nunito(
+                  fontSize: 12.5, color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _pontosCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Pontos a descontar',
+                prefixIcon: Icon(Icons.remove_circle_outline_rounded, size: 18),
+              ),
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(4),
+              ],
+              validator: (v) {
+                final n = int.tryParse(v ?? '');
+                if (n == null || n <= 0) {
+                  return 'Informe um valor de pontos maior que zero';
+                }
+                return null;
+              },
+            ),
+          ],
         ),
       );
     }
 
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: scheme.outline.withValues(alpha: 0.4)),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      padding: const EdgeInsets.all(8),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: Image.file(
-              imagem!,
-              width: 48,
-              height: 48,
-              fit: BoxFit.cover,
-            ),
+    if (_carregandoBonus) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 40),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final bonus = _bonusDoSelecionado;
+    if (bonus == null || bonus.categorias.isEmpty) {
+      return const _EstadoVazio(
+        icon: Icons.category_outlined,
+        mensagem:
+            'O bônus deste colaborador ainda não tem categorias cadastradas.',
+      );
+    }
+
+    final categoriasFiltradas = _filtrarCategorias(bonus.categorias);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Toque em uma subcategoria para definir a penalidade deste '
+          'colaborador.',
+          style: GoogleFonts.nunito(fontSize: 12, color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          onChanged: (v) => setState(() => _buscaCategoria = v),
+          decoration: const InputDecoration(
+            hintText: 'Buscar categoria ou subcategoria',
+            prefixIcon: Icon(Icons.search_rounded, size: 18),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Imagem anexada',
-              style: GoogleFonts.nunito(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 10),
+        if (categoriasFiltradas.isEmpty)
+          const _EstadoVazio(
+            icon: Icons.search_off_rounded,
+            mensagem: 'Nenhuma categoria ou subcategoria encontrada.',
+          )
+        else
+          for (final cat in categoriasFiltradas)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _CategoriaSelecionavel(
+                categoria: cat,
+                onSelecionarSub: (sub) => _confirmarSubcategoria(cat, sub),
+              ),
             ),
-          ),
-          Tooltip(
-            message: 'Trocar imagem',
-            child: IconButton(
-              icon: const Icon(Icons.edit_outlined, size: 18),
-              onPressed: () => _selecionar(context),
-            ),
-          ),
-          Tooltip(
-            message: 'Remover imagem',
-            child: IconButton(
-              icon: const Icon(Icons.close_rounded, size: 18),
-              onPressed: () => onChanged(null),
-            ),
-          ),
-        ],
-      ),
+      ],
     );
   }
 }
@@ -1581,13 +2118,25 @@ class _DialogPenalidadeState extends State<_DialogPenalidade> {
   final _osCtrl = TextEditingController();
   int? _motivoId;
   bool _verificandoOs = false;
-  File? _imagemSelecionada;
+  List<File> _imagensSelecionadas = [];
+  List<_ColaboradorExtraSelecionado> _colaboradoresExtras = [];
 
   @override
   void dispose() {
     _observacaoCtrl.dispose();
     _osCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _incluirColaborador() async {
+    final resultado = await _abrirDialogIncluirColaborador(
+      context: context,
+      token: widget.token,
+      colaboradorPrincipalId: widget.colaboradorId,
+      jaIncluidos: _colaboradoresExtras,
+    );
+    if (resultado == null || !mounted) return;
+    setState(() => _colaboradoresExtras = [..._colaboradoresExtras, resultado]);
   }
 
   /// Confirma o envio: se a OS informada já teve penalidade lançada para
@@ -1614,7 +2163,8 @@ class _DialogPenalidadeState extends State<_DialogPenalidade> {
         motivoId: _motivoId!,
         observacao: _observacaoCtrl.text.trim(),
         os: os,
-        imagemArquivo: _imagemSelecionada,
+        imagens: _imagensSelecionadas,
+        colaboradoresExtras: _colaboradoresExtras,
       ),
     );
   }
@@ -1693,16 +2243,41 @@ class _DialogPenalidadeState extends State<_DialogPenalidade> {
                       DropdownButtonFormField<int>(
                         // ignore: deprecated_member_use
                         value: _motivoId,
+                        isExpanded: true,
+                        itemHeight: null,
                         decoration: const InputDecoration(
                           labelText: 'Motivo',
                           prefixIcon:
                               Icon(Icons.label_outline_rounded, size: 18),
                         ),
+                        // Mostra o texto truncado em uma linha só no campo
+                        // fechado (evita overflow), mas o menu aberto (via
+                        // `items`) exibe o texto completo, quebrando linha.
+                        selectedItemBuilder: (context) => [
+                          for (final motivo in widget.motivos)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                motivo.nome,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.nunito(fontSize: 13),
+                              ),
+                            ),
+                        ],
                         items: [
                           for (final motivo in widget.motivos)
                             DropdownMenuItem(
                               value: motivo.id,
-                              child: Text(motivo.nome),
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 8),
+                                child: Text(
+                                  motivo.nome,
+                                  softWrap: true,
+                                  style: GoogleFonts.nunito(fontSize: 13),
+                                ),
+                              ),
                             ),
                         ],
                         onChanged: (v) => setState(() => _motivoId = v),
@@ -1742,11 +2317,49 @@ class _DialogPenalidadeState extends State<_DialogPenalidade> {
                             : null,
                       ),
                       const SizedBox(height: 12),
-                      _CampoImagemAnexo(
-                        imagem: _imagemSelecionada,
-                        onChanged: (arquivo) =>
-                            setState(() => _imagemSelecionada = arquivo),
+                      _CampoImagensAnexo(
+                        imagens: _imagensSelecionadas,
+                        onChanged: (arquivos) =>
+                            setState(() => _imagensSelecionadas = arquivos),
+                        botaoExtra: Tooltip(
+                          message: _colaboradoresExtras.isEmpty
+                              ? 'Incluir colaborador'
+                              : 'Incluir outro colaborador',
+                          child: OutlinedButton.icon(
+                            onPressed: _incluirColaborador,
+                            icon: const Icon(Icons.group_add_outlined, size: 18),
+                            label: Text(
+                              _colaboradoresExtras.isEmpty
+                                  ? 'Incluir colaborador'
+                                  : 'Incluir outro colaborador',
+                            ),
+                            style: ButtonStyle(
+                              mouseCursor:
+                                  WidgetStateProperty.all(SystemMouseCursors.click),
+                              alignment: Alignment.centerLeft,
+                            ),
+                          ),
+                        ),
                       ),
+                      if (_colaboradoresExtras.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final extra in _colaboradoresExtras)
+                              _ChipColaboradorExtra(
+                                extra: extra,
+                                onRemover: () => setState(() {
+                                  _colaboradoresExtras = _colaboradoresExtras
+                                      .where((e) =>
+                                          e.colaboradorId != extra.colaboradorId)
+                                      .toList();
+                                }),
+                              ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1811,13 +2424,15 @@ class _DialogPenalidadeAvulsaResultado {
   final int motivoId;
   final String observacao;
   final String os;
-  final File? imagemArquivo;
+  final List<File> imagens;
+  final List<_ColaboradorExtraSelecionado> colaboradoresExtras;
   const _DialogPenalidadeAvulsaResultado({
     required this.pontos,
     required this.motivoId,
     required this.observacao,
     required this.os,
-    this.imagemArquivo,
+    this.imagens = const [],
+    this.colaboradoresExtras = const [],
   });
 }
 
@@ -1844,7 +2459,8 @@ class _DialogPenalidadeAvulsaState extends State<_DialogPenalidadeAvulsa> {
   final _osCtrl = TextEditingController();
   int? _motivoId;
   bool _verificandoOs = false;
-  File? _imagemSelecionada;
+  List<File> _imagensSelecionadas = [];
+  List<_ColaboradorExtraSelecionado> _colaboradoresExtras = [];
 
   @override
   void dispose() {
@@ -1852,6 +2468,17 @@ class _DialogPenalidadeAvulsaState extends State<_DialogPenalidadeAvulsa> {
     _observacaoCtrl.dispose();
     _osCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _incluirColaborador() async {
+    final resultado = await _abrirDialogIncluirColaborador(
+      context: context,
+      token: widget.token,
+      colaboradorPrincipalId: widget.colaboradorId,
+      jaIncluidos: _colaboradoresExtras,
+    );
+    if (resultado == null || !mounted) return;
+    setState(() => _colaboradoresExtras = [..._colaboradoresExtras, resultado]);
   }
 
   /// Confirma o envio: se a OS informada já teve penalidade lançada para
@@ -1879,7 +2506,8 @@ class _DialogPenalidadeAvulsaState extends State<_DialogPenalidadeAvulsa> {
         motivoId: _motivoId!,
         observacao: _observacaoCtrl.text.trim(),
         os: os,
-        imagemArquivo: _imagemSelecionada,
+        imagens: _imagensSelecionadas,
+        colaboradoresExtras: _colaboradoresExtras,
       ),
     );
   }
@@ -1969,16 +2597,41 @@ class _DialogPenalidadeAvulsaState extends State<_DialogPenalidadeAvulsa> {
                       DropdownButtonFormField<int>(
                         // ignore: deprecated_member_use
                         value: _motivoId,
+                        isExpanded: true,
+                        itemHeight: null,
                         decoration: const InputDecoration(
                           labelText: 'Motivo',
                           prefixIcon:
                               Icon(Icons.label_outline_rounded, size: 18),
                         ),
+                        // Mostra o texto truncado em uma linha só no campo
+                        // fechado (evita overflow), mas o menu aberto (via
+                        // `items`) exibe o texto completo, quebrando linha.
+                        selectedItemBuilder: (context) => [
+                          for (final motivo in widget.motivos)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                motivo.nome,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.nunito(fontSize: 13),
+                              ),
+                            ),
+                        ],
                         items: [
                           for (final motivo in widget.motivos)
                             DropdownMenuItem(
                               value: motivo.id,
-                              child: Text(motivo.nome),
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 8),
+                                child: Text(
+                                  motivo.nome,
+                                  softWrap: true,
+                                  style: GoogleFonts.nunito(fontSize: 13),
+                                ),
+                              ),
                             ),
                         ],
                         onChanged: (v) => setState(() => _motivoId = v),
@@ -2018,11 +2671,49 @@ class _DialogPenalidadeAvulsaState extends State<_DialogPenalidadeAvulsa> {
                             : null,
                       ),
                       const SizedBox(height: 12),
-                      _CampoImagemAnexo(
-                        imagem: _imagemSelecionada,
-                        onChanged: (arquivo) =>
-                            setState(() => _imagemSelecionada = arquivo),
+                      _CampoImagensAnexo(
+                        imagens: _imagensSelecionadas,
+                        onChanged: (arquivos) =>
+                            setState(() => _imagensSelecionadas = arquivos),
+                        botaoExtra: Tooltip(
+                          message: _colaboradoresExtras.isEmpty
+                              ? 'Incluir colaborador'
+                              : 'Incluir outro colaborador',
+                          child: OutlinedButton.icon(
+                            onPressed: _incluirColaborador,
+                            icon: const Icon(Icons.group_add_outlined, size: 18),
+                            label: Text(
+                              _colaboradoresExtras.isEmpty
+                                  ? 'Incluir colaborador'
+                                  : 'Incluir outro colaborador',
+                            ),
+                            style: ButtonStyle(
+                              mouseCursor:
+                                  WidgetStateProperty.all(SystemMouseCursors.click),
+                              alignment: Alignment.centerLeft,
+                            ),
+                          ),
+                        ),
                       ),
+                      if (_colaboradoresExtras.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final extra in _colaboradoresExtras)
+                              _ChipColaboradorExtra(
+                                extra: extra,
+                                onRemover: () => setState(() {
+                                  _colaboradoresExtras = _colaboradoresExtras
+                                      .where((e) =>
+                                          e.colaboradorId != extra.colaboradorId)
+                                      .toList();
+                                }),
+                              ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),

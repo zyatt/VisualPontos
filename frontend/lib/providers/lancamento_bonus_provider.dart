@@ -127,8 +127,16 @@ class LancamentoBonusProvider extends ChangeNotifier {
   ///
   /// Informe [subcategoriaId] para uma penalidade do catálogo de
   /// categorias/subcategorias, ou [pontos] para uma penalidade AVULSA
-  /// (sem vínculo com o catálogo). [imagemPath] é opcional (já deve ter
-  /// sido obtido antes via [uploadImagem]).
+  /// (sem vínculo com o catálogo). [imagensPaths] é opcional (cada
+  /// caminho já deve ter sido obtido antes via [uploadImagem], chamado
+  /// uma vez por imagem).
+  ///
+  /// [colaboradoresExtras] são outros colaboradores incluídos junto com o
+  /// principal via "incluir colaborador" — recebem a mesma penalidade
+  /// (motivo/observação/OS/imagens), cada um com sua própria categoria/
+  /// subcategoria (ou pontos avulsos). Só afeta o saldo local de
+  /// [_colaborador principal]; os colaboradores extras ficam com o saldo
+  /// atualizado no backend e refletem ao abrir a própria página deles.
   Future<String?> lancarPenalidade({
     required String token,
     required int colaboradorId,
@@ -137,7 +145,8 @@ class LancamentoBonusProvider extends ChangeNotifier {
     required int motivoId,
     required String observacao,
     required String os,
-    String? imagemPath,
+    List<String>? imagensPaths,
+    List<ColaboradorExtraPenalidade>? colaboradoresExtras,
   }) async {
     _carregando = true;
     notifyListeners();
@@ -150,7 +159,8 @@ class LancamentoBonusProvider extends ChangeNotifier {
       motivoId: motivoId,
       observacao: observacao,
       os: os,
-      imagemPath: imagemPath,
+      imagensPaths: imagensPaths,
+      colaboradoresExtras: colaboradoresExtras,
     );
 
     _carregando = false;

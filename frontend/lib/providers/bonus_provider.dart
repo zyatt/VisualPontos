@@ -38,6 +38,18 @@ class BonusProvider extends ChangeNotifier {
     return _erro;
   }
 
+  /// Busca o detalhe de um bônus SEM alterar o estado do provider
+  /// (`bonusAtual`/`lista`). Usada para consultar o bônus de OUTRO
+  /// colaborador (ex.: no fluxo "incluir colaborador"), evitando
+  /// sobrescrever o bônus que já está sendo exibido na tela principal.
+  Future<Bonus?> buscarBonusPontual({
+    required String token,
+    required int id,
+  }) async {
+    final res = await _service.buscar(token: token, id: id);
+    return res.success ? res.bonus : null;
+  }
+
   Future<String?> carregarDetalhe(
       {required String token, required int id}) async {
     _carregando = true;

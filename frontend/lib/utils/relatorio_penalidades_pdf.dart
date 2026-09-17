@@ -226,42 +226,57 @@ Future<pw.MemoryImage> _carregarLogo() async {
 
 /// Imagem já baixada de um lançamento, junto da URL original — usada
 /// para exibir a miniatura no PDF e, ao mesmo tempo, torná-la clicável
-/// (abre a imagem completa no navegador ao clicar).
+/// (abre a imagem completa no navegador ao clicar). Quando o lançamento
+/// tem mais de uma imagem anexada, mostramos apenas a primeira como
+/// miniatura (célula da tabela é pequena) e [totalImagens] guarda a
+/// contagem total, para exibir um indicador "+N".
 class _ImagemLancamento {
-  final pw.MemoryImage imagem;
-  final String url;
+  final List<pw.MemoryImage> imagens;
+  final List<String> urls;
 
-  const _ImagemLancamento({required this.imagem, required this.url});
+  const _ImagemLancamento({
+    required this.imagens,
+    required this.urls,
+  });
 }
 
-/// Baixa as imagens anexadas aos [lancamentos] (quando houver) e devolve
-/// um mapa `id do lançamento -> _ImagemLancamento` pronto para uso na
-/// tabela do relatório. Lançamentos sem imagem, ou cuja imagem falhe ao
-/// baixar (servidor fora do ar, arquivo removido, etc.), simplesmente não
-/// entram no mapa — a tabela mostra "-" nesses casos, sem quebrar a
-/// geração do PDF.
+/// Baixa TODAS as imagens anexadas a cada um dos [lancamentos] (quando
+/// houver) e devolve um mapa `id do lançamento -> _ImagemLancamento`
+/// pronto para uso na tabela do relatório. Imagens que falharem ao
+/// baixar (servidor fora do ar, arquivo removido, etc.) são ignoradas
+/// individualmente — as demais do mesmo lançamento continuam aparecendo.
+/// Lançamentos sem nenhuma imagem baixada com sucesso simplesmente não
+/// entram no mapa, e a tabela mostra "-" nesses casos.
 Future<Map<int, _ImagemLancamento>> _carregarImagensLancamentos(
   List<LancamentoBonus> lancamentos,
 ) async {
   final imagens = <int, _ImagemLancamento>{};
 
   for (final lancamento in lancamentos) {
-    final url = lancamento.imagemUrl;
-    if (url == null) continue;
+    if (lancamento.imagensUrl.isEmpty) continue;
 
-    try {
-      final res = await http.get(Uri.parse(url)).timeout(
-            const Duration(seconds: 10),
-          );
-      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
-        imagens[lancamento.id] = _ImagemLancamento(
-          imagem: pw.MemoryImage(res.bodyBytes),
-          url: url,
-        );
+    final imagensBaixadas = <pw.MemoryImage>[];
+    final urlsBaixadas = <String>[];
+
+    for (final url in lancamento.imagensUrl) {
+      try {
+        final res = await http.get(Uri.parse(url)).timeout(
+              const Duration(seconds: 10),
+            );
+        if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+          imagensBaixadas.add(pw.MemoryImage(res.bodyBytes));
+          urlsBaixadas.add(url);
+        }
+      } catch (_) {
+        // Ignora silenciosamente — só esta imagem específica não aparece.
       }
-    } catch (_) {
-      // Ignora silenciosamente — a miniatura só não aparece para este
-      // lançamento específico.
+    }
+
+    if (imagensBaixadas.isNotEmpty) {
+      imagens[lancamento.id] = _ImagemLancamento(
+        imagens: imagensBaixadas,
+        urls: urlsBaixadas,
+      );
     }
   }
 
@@ -1303,14 +1318,14 @@ Future<pw.Page> _paginaColaborador({
           pw.Table(
             border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
             columnWidths: {
-              0: const pw.FlexColumnWidth(1.2), // Categoria
-              1: const pw.FlexColumnWidth(1.5), // Subcategoria
-              2: const pw.FlexColumnWidth(1.0), // Data
-              3: const pw.FlexColumnWidth(0.7), // Pontos
-              4: const pw.FlexColumnWidth(1.3), // Motivo
-              5: const pw.FlexColumnWidth(0.85), // OS
-              6: const pw.FlexColumnWidth(1.9), // Observação
-              7: const pw.FlexColumnWidth(1.6), // Imagem
+              0: const pw.FlexColumnWidth(1.0), // Categoria
+              1: const pw.FlexColumnWidth(1.3), // Subcategoria
+              2: const pw.FlexColumnWidth(0.9), // Data
+              3: const pw.FlexColumnWidth(0.6), // Pontos
+              4: const pw.FlexColumnWidth(1.1), // Motivo
+              5: const pw.FlexColumnWidth(0.75), // OS
+              6: const pw.FlexColumnWidth(1.6), // Observação
+              7: const pw.FlexColumnWidth(1.1), // Imagem (grid 2x2, até 4)
             },
             children: [
               pw.TableRow(
@@ -1420,32 +1435,67 @@ pw.Widget _celulaCabecalho(String texto, {pw.TextAlign? textAlign}) {
   );
 }
 
-/// Célula da tabela que exibe a miniatura da imagem anexada ao
-/// lançamento (quando houver), clicável — ao tocar/clicar, abre a
-/// imagem original em tamanho completo no navegador. Sem imagem, mostra
-/// o mesmo "-" usado nas demais colunas, mantendo a tabela consistente.
+/// Quantidade máxima de miniaturas exibidas por lançamento na tabela do
+/// PDF. Imagens além desse limite não aparecem (o lançamento continua
+/// com todas as imagens no app — isso afeta só a exibição no relatório).
+const int _maxImagensPdf = 4;
+
+/// Tamanho (largura/altura) de cada miniatura no grid 2x2.
+const double _tamanhoImagemPdf = 32.0;
+
+/// Célula da tabela que exibe as miniaturas das imagens anexadas ao
+/// lançamento, organizadas em um grid 2x2 (no máximo [_maxImagensPdf]
+/// imagens) — cada uma clicável individualmente (abre a respectiva
+/// imagem em tamanho completo). Sem imagem, mostra o mesmo "-" usado nas
+/// demais colunas.
 pw.Widget _celulaImagem(_ImagemLancamento? dados) {
-  if (dados == null) {
+  if (dados == null || dados.imagens.isEmpty) {
     return _celula('-', textAlign: pw.TextAlign.center);
+  }
+
+  final imagens = dados.imagens.take(_maxImagensPdf).toList();
+  final urls = dados.urls.take(_maxImagensPdf).toList();
+
+  pw.Widget miniatura(int i) {
+    return pw.UrlLink(
+      destination: urls[i],
+      child: pw.ClipRRect(
+        horizontalRadius: 4,
+        verticalRadius: 4,
+        child: pw.Container(
+          width: _tamanhoImagemPdf,
+          height: _tamanhoImagemPdf,
+          decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: PdfColors.grey400, width: 0.5),
+          ),
+          child: pw.Image(imagens[i], fit: pw.BoxFit.cover),
+        ),
+      ),
+    );
   }
 
   return pw.Padding(
     padding: const pw.EdgeInsets.all(4),
     child: pw.Center(
-      child: pw.UrlLink(
-        destination: dados.url,
-        child: pw.ClipRRect(
-          horizontalRadius: 4,
-          verticalRadius: 4,
-          child: pw.Container(
-            width: 70,
-            height: 70,
-            decoration: pw.BoxDecoration(
-              border: pw.Border.all(color: PdfColors.grey400, width: 0.5),
+      child: pw.Column(
+        mainAxisSize: pw.MainAxisSize.min,
+        mainAxisAlignment: pw.MainAxisAlignment.center,
+        children: [
+          for (int linha = 0; linha < imagens.length; linha += 2) ...[
+            if (linha > 0) pw.SizedBox(height: 3),
+            pw.Row(
+              mainAxisSize: pw.MainAxisSize.min,
+              mainAxisAlignment: pw.MainAxisAlignment.center,
+              children: [
+                miniatura(linha),
+                if (linha + 1 < imagens.length) ...[
+                  pw.SizedBox(width: 3),
+                  miniatura(linha + 1),
+                ],
+              ],
             ),
-            child: pw.Image(dados.imagem, fit: pw.BoxFit.cover),
-          ),
-        ),
+          ],
+        ],
       ),
     ),
   );
