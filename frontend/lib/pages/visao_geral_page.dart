@@ -8,6 +8,7 @@ import '../models/lancamento_bonus.dart';
 import '../providers/usuario_provider.dart';
 import '../providers/visao_geral_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/relatorio_geral_penalidades.dart' show setorComercial;
 
 /// Argumentos passados via `extra` para a rota de histórico quando se
 /// quer abrir direto num mês específico com um lançamento destacado
@@ -117,8 +118,11 @@ class _VisaoGeralPageState extends State<VisaoGeralPage> {
                 itemBuilder: (context, i) => _ColaboradorCard(
                   resumo: resumos[i],
                   onTap: () async {
+                    final ehComercial = resumos[i].colaborador.setor == setorComercial;
                     await context.push(
-                      '/colaboradores/pontuacao',
+                      ehComercial
+                          ? '/colaboradores/checklist'
+                          : '/colaboradores/pontuacao',
                       extra: resumos[i].colaborador,
                     );
                     if (context.mounted) _carregar();

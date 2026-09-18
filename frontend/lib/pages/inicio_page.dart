@@ -198,6 +198,11 @@ class InicioPage extends StatelessWidget {
                       onTap: () => context.push('/motivos'),
                     ),
                     _InicioCard(
+                      icon: Icons.checklist_rtl_rounded,
+                      title: 'Requisitos · Comercial',
+                      onTap: () => context.push('/requisitos'),
+                    ),
+                    _InicioCard(
                       icon: Icons.person_add_alt_1_rounded,
                       title: 'Usuários',
                       onTap: () => context.push('/usuarios'),

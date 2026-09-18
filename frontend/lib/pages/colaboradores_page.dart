@@ -28,25 +28,6 @@ class _ColaboradoresPageState extends State<ColaboradoresPage> {
     await context.read<ColaboradorProvider>().carregarColaboradores(token: token);
   }
 
-  Future<void> _abrirPontuacao(Colaborador colaborador) async {
-    final resultado = await context.push<String>(
-      '/colaboradores/pontuacao',
-      extra: colaborador,
-    );
-
-    if (!mounted) return;
-
-    if (resultado == 'editado') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Colaborador atualizado com sucesso')),
-      );
-    } else if (resultado == 'excluido') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Colaborador excluído com sucesso')),
-      );
-    }
-  }
-
   Future<void> _abrirRelatorioGeral() async {
     await abrirRelatorioGeralPenalidades(context);
   }
@@ -58,6 +39,40 @@ class _ColaboradoresPageState extends State<ColaboradoresPage> {
         const SnackBar(content: Text('Colaborador cadastrado com sucesso')),
       );
     }
+  }
+
+  void _abrirSetor(String setor) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ColaboradoresSetorPage(setor: setor),
+      ),
+    );
+  }
+
+  Widget _buildListaSetores(List<Colaborador> colaboradores) {
+    final agrupado = <String, List<Colaborador>>{};
+    for (final colaborador in colaboradores) {
+      agrupado.putIfAbsent(colaborador.setor, () => []).add(colaborador);
+    }
+    final setores = agrupado.keys.toList()..sort();
+
+    final itens = <Widget>[];
+    for (final setor in setores) {
+      itens.add(
+        _SetorTile(
+          setor: setor,
+          quantidade: agrupado[setor]!.length,
+          onTap: () => _abrirSetor(setor),
+        ),
+      );
+      itens.add(const SizedBox(height: 10));
+    }
+    if (itens.isNotEmpty) itens.removeLast();
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+      children: itens,
+    );
   }
 
   @override
@@ -149,15 +164,194 @@ class _ColaboradoresPageState extends State<ColaboradoresPage> {
                         return Center(
                           child: ConstrainedBox(
                             constraints: const BoxConstraints(maxWidth: 760),
+                            child: _buildListaSetores(
+                              provider.colaboradores,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+/// Página que mostra apenas os colaboradores de um [setor] específico,
+/// com o mesmo cabeçalho (voltar, novo colaborador, atualizar) da
+/// listagem geral, porém com um relatório restrito aos colaboradores
+/// desse setor.
+class ColaboradoresSetorPage extends StatefulWidget {
+  final String setor;
+
+  const ColaboradoresSetorPage({super.key, required this.setor});
+
+  @override
+  State<ColaboradoresSetorPage> createState() =>
+      _ColaboradoresSetorPageState();
+}
+
+class _ColaboradoresSetorPageState extends State<ColaboradoresSetorPage> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _carregar());
+  }
+
+  Future<void> _carregar() async {
+    final token = context.read<UsuarioProvider>().token;
+    if (token == null) return;
+    await context.read<ColaboradorProvider>().carregarColaboradores(token: token);
+  }
+
+  Future<void> _abrirPontuacao(Colaborador colaborador) async {
+    // Colaboradores do setor Comercial seguem a lógica de requisitos/
+    // checklist em vez de pontos/bônus — abre a rota correspondente
+    // no lugar da tela de pontuação.
+    if (colaborador.setor == setorComercial) {
+      await context.push('/colaboradores/checklist', extra: colaborador);
+      return;
+    }
+
+    final resultado = await context.push<String>(
+      '/colaboradores/pontuacao',
+      extra: colaborador,
+    );
+
+    if (!mounted) return;
+
+    if (resultado == 'editado') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Colaborador atualizado com sucesso')),
+      );
+    } else if (resultado == 'excluido') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Colaborador excluído com sucesso')),
+      );
+    }
+  }
+
+  Future<void> _abrirRelatorioSetor(List<Colaborador> colaboradoresDoSetor) async {
+    await abrirRelatorioGeralPenalidades(
+      context,
+      colaboradoresFiltrados: colaboradoresDoSetor,
+      setor: widget.setor,
+    );
+  }
+
+  Future<void> _abrirCadastro() async {
+    final cadastrou = await context.push<bool>('/colaboradores/novo');
+    if (cadastrou == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Colaborador cadastrado com sucesso')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<ColaboradorProvider>();
+    final colaboradoresDoSetor = provider.colaboradores
+        .where((c) => c.setor == widget.setor)
+        .toList();
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          widget.setor,
+          style: GoogleFonts.raleway(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+        ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          tooltip: 'Voltar',
+          style: ButtonStyle(
+            mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+          ),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Tooltip(
+              message: 'Novo colaborador',
+              child: FilledButton.icon(
+                onPressed: _abrirCadastro,
+                style: ButtonStyle(
+                  mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                ),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Novo colaborador'),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Atualizar',
+            style: ButtonStyle(
+              mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+            ),
+            onPressed: provider.carregando ? null : _carregar,
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
+      body: provider.carregando
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 760),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                      child: _RelatorioGeralCard(
+                        titulo: 'Relatório · ${widget.setor}',
+                        descricao:
+                            'Gera um PDF com o relatório de penalidades dos colaboradores de ${widget.setor}',
+                        onTap: colaboradoresDoSetor.isEmpty
+                            ? null
+                            : () => _abrirRelatorioSetor(colaboradoresDoSetor),
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _carregar,
+                    child: Builder(
+                      builder: (context) {
+                        if (provider.erro != null &&
+                            provider.colaboradores.isEmpty) {
+                          return _EstadoVazio(
+                            icon: Icons.error_outline_rounded,
+                            mensagem: provider.erro!,
+                            corIcone: AppTheme.error,
+                          );
+                        }
+
+                        if (colaboradoresDoSetor.isEmpty) {
+                          return const _EstadoVazio(
+                            icon: Icons.groups_2_outlined,
+                            mensagem: 'Nenhum colaborador neste setor.',
+                          );
+                        }
+
+                        return Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 760),
                             child: ListView.separated(
-                              padding:
-                                  const EdgeInsets.fromLTRB(16, 12, 16, 96),
-                              itemCount: provider.colaboradores.length,
+                              padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+                              itemCount: colaboradoresDoSetor.length,
                               separatorBuilder: (_, __) =>
                                   const SizedBox(height: 10),
                               itemBuilder: (context, index) {
-                                final colaborador =
-                                    provider.colaboradores[index];
+                                final colaborador = colaboradoresDoSetor[index];
                                 return _ColaboradorTile(
                                   colaborador: colaborador,
                                   onTap: () => _abrirPontuacao(colaborador),
@@ -178,8 +372,15 @@ class _ColaboradoresPageState extends State<ColaboradoresPage> {
 
 class _RelatorioGeralCard extends StatelessWidget {
   final VoidCallback? onTap;
+  final String titulo;
+  final String descricao;
 
-  const _RelatorioGeralCard({required this.onTap});
+  const _RelatorioGeralCard({
+    required this.onTap,
+    this.titulo = 'Relatório geral',
+    this.descricao =
+        'Gera um PDF único com o relatório de penalidades de todos os colaboradores',
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -225,7 +426,7 @@ class _RelatorioGeralCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Relatório geral',
+                      titulo,
                       style: GoogleFonts.raleway(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -236,7 +437,7 @@ class _RelatorioGeralCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Gera um PDF único com o relatório de penalidades de todos os colaboradores',
+                      descricao,
                       style: GoogleFonts.nunito(
                         fontSize: 12,
                         color: scheme.onSurfaceVariant,
@@ -248,6 +449,89 @@ class _RelatorioGeralCard extends StatelessWidget {
               Icon(
                 Icons.chevron_right_rounded,
                 color: habilitado ? AppTheme.orange : scheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SetorTile extends StatelessWidget {
+  final String setor;
+  final int quantidade;
+  final VoidCallback onTap;
+
+  const _SetorTile({
+    required this.setor,
+    required this.quantidade,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        mouseCursor: SystemMouseCursors.click,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: scheme.outline.withValues(alpha: 0.5),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.orange.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.folder_rounded,
+                  color: AppTheme.orange,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      setor,
+                      style: GoogleFonts.raleway(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      quantidade == 1
+                          ? '1 colaborador'
+                          : '$quantidade colaboradores',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: scheme.onSurfaceVariant,
               ),
             ],
           ),

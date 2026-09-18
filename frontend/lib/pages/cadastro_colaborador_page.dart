@@ -9,6 +9,17 @@ import '../providers/bonus_provider.dart';
 import '../providers/colaborador_provider.dart';
 import '../providers/usuario_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/relatorio_geral_penalidades.dart' show setorComercial;
+
+/// Setores disponíveis para seleção no cadastro/edição de colaborador.
+/// O campo `setor` continua sendo um texto simples no backend/model —
+/// isso só restringe as opções mostradas ao usuário no formulário.
+const List<String> _setoresDisponiveis = [
+  'Produção 1',
+  'Produção 2',
+  'Compras',
+  'Comercial',
+];
 
 class _PrimeiraLetraMaiusculaFormatter extends TextInputFormatter {
   @override
@@ -92,6 +103,43 @@ class _CadastroColaboradorPageState extends State<CadastroColaboradorPage> {
     super.dispose();
   }
 
+  Future<void> _abrirSeletorDeSetor(FormFieldState<String> field) async {
+    final setoresParaExibir = [
+      // Se o colaborador já tem um setor fora da lista padrão (cadastro
+      // antigo), mantém essa opção disponível para não perder/forçar a
+      // troca dele.
+      if (_setorCtrl.text.isNotEmpty &&
+          !_setoresDisponiveis.contains(_setorCtrl.text))
+        _setorCtrl.text,
+      ..._setoresDisponiveis,
+    ];
+
+    final resultado = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => _SeletorSetorSheet(
+        setores: setoresParaExibir,
+        setorSelecionado: _setorCtrl.text.isEmpty ? null : _setorCtrl.text,
+      ),
+    );
+
+    if (resultado == null) return;
+
+    setState(() {
+      _setorCtrl.text = resultado;
+
+      // Colaboradores do setor Comercial não usam bônus/pontos — limpa
+      // qualquer vínculo já selecionado para não salvar um bonus_id
+      // "invisível" (o campo deixa de aparecer no formulário abaixo).
+      if (resultado == setorComercial) {
+        _bonusIdSelecionado = null;
+        _bonusNomeSelecionado = null;
+        _bonusFoiAlterado = true;
+      }
+    });
+    field.didChange(resultado);
+  }
+
   Future<void> _abrirSeletorDeBonus() async {
     final bonusProvider = context.read<BonusProvider>();
 
@@ -147,21 +195,28 @@ class _CadastroColaboradorPageState extends State<CadastroColaboradorPage> {
     final provider = context.read<ColaboradorProvider>();
     final String? erro;
 
+    // Segurança extra: mesmo que o estado da UI já limpe o bônus ao
+    // trocar para Comercial, garante aqui que nunca é enviado um
+    // bonus_id para esse setor.
+    final setorFinal = _setorCtrl.text.trim();
+    final bonusIdFinal = setorFinal == setorComercial ? null : _bonusIdSelecionado;
+    final limparBonusFinal = setorFinal == setorComercial ? true : _bonusFoiAlterado;
+
     if (widget.isEdicao) {
       erro = await provider.editarColaborador(
         token: token,
         id: widget.colaboradorParaEditar!.id,
         nome: _nomeCtrl.text.trim(),
-        setor: _setorCtrl.text.trim(),
-        bonusId: _bonusIdSelecionado,
-        limparBonus: _bonusFoiAlterado && _bonusIdSelecionado == null,
+        setor: setorFinal,
+        bonusId: bonusIdFinal,
+        limparBonus: limparBonusFinal && bonusIdFinal == null,
       );
     } else {
       erro = await provider.cadastrarColaborador(
         token: token,
         nome: _nomeCtrl.text.trim(),
-        setor: _setorCtrl.text.trim(),
-        bonusId: _bonusIdSelecionado,
+        setor: setorFinal,
+        bonusId: bonusIdFinal,
       );
     }
 
@@ -407,78 +462,121 @@ class _CadastroColaboradorPageState extends State<CadastroColaboradorPage> {
                     ),
                     const SizedBox(height: 14),
 
-                    TextFormField(
-                      controller: _setorCtrl,
-                      focusNode: _setorFocus,
-                      decoration: const InputDecoration(
-                        labelText: 'Setor',
-                        prefixIcon: Icon(Icons.apartment_outlined, size: 18),
-                      ),
-                      textCapitalization: TextCapitalization.words,
-                      inputFormatters: [
-                        _PrimeiraLetraMaiusculaFormatter(),
-                      ],
-                      textInputAction: TextInputAction.done,
-                      onFieldSubmitted: (_) => _carregando ? null : _salvar(),
+                    FormField<String>(
+                      initialValue:
+                          _setorCtrl.text.isNotEmpty ? _setorCtrl.text : null,
                       validator: (v) =>
                           (v == null || v.trim().isEmpty) ? 'Informe o setor' : null,
+                      builder: (field) {
+                        return InkWell(
+                          focusNode: _setorFocus,
+                          mouseCursor: SystemMouseCursors.click,
+                          borderRadius: BorderRadius.circular(4),
+                          onTap: _carregando
+                              ? null
+                              : () => _abrirSeletorDeSetor(field),
+                          child: InputDecorator(
+                            decoration: InputDecoration(
+                              labelText: 'Setor',
+                              prefixIcon:
+                                  const Icon(Icons.apartment_outlined, size: 18),
+                              suffixIcon: const Icon(Icons.expand_more_rounded,
+                                  size: 20),
+                              errorText: field.errorText,
+                            ),
+                            isEmpty: _setorCtrl.text.isEmpty,
+                            child: Text(_setorCtrl.text),
+                          ),
+                        );
+                      },
                     ),
                     const SizedBox(height: 14),
 
                     // ─── Seletor de bônus vinculado ─────────────────────
-                    Text(
-                      'Bônus vinculado',
-                      style: GoogleFonts.nunito(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: scheme.onSurfaceVariant,
+                    // Colaboradores do setor Comercial seguem a lógica de
+                    // requisitos/checklist — não têm bônus/pontos, então
+                    // esse campo nem aparece para eles.
+                    if (_setorCtrl.text != setorComercial) ...[
+                      Text(
+                        'Bônus vinculado',
+                        style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    Material(
-                      color: scheme.surface,
-                      borderRadius: BorderRadius.circular(10),
-                      child: InkWell(
-                        onTap: _carregando ? null : _abrirSeletorDeBonus,
+                      const SizedBox(height: 6),
+                      Material(
+                        color: scheme.surface,
                         borderRadius: BorderRadius.circular(10),
-                        mouseCursor: SystemMouseCursors.click,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: scheme.outline),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.workspace_premium_outlined,
-                                size: 18,
-                                color: _bonusIdSelecionado != null
-                                    ? AppTheme.orange
-                                    : scheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  _bonusNomeSelecionado ?? 'Nenhum bônus selecionado',
-                                  style: GoogleFonts.nunito(
-                                    fontSize: 14,
-                                    fontWeight: _bonusIdSelecionado != null
-                                        ? FontWeight.w700
-                                        : FontWeight.w500,
-                                    color: _bonusIdSelecionado != null
-                                        ? scheme.onSurface
-                                        : scheme.onSurfaceVariant,
+                        child: InkWell(
+                          onTap: _carregando ? null : _abrirSeletorDeBonus,
+                          borderRadius: BorderRadius.circular(10),
+                          mouseCursor: SystemMouseCursors.click,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: scheme.outline),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.workspace_premium_outlined,
+                                  size: 18,
+                                  color: _bonusIdSelecionado != null
+                                      ? AppTheme.orange
+                                      : scheme.onSurfaceVariant,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    _bonusNomeSelecionado ?? 'Nenhum bônus selecionado',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 14,
+                                      fontWeight: _bonusIdSelecionado != null
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                      color: _bonusIdSelecionado != null
+                                          ? scheme.onSurface
+                                          : scheme.onSurfaceVariant,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              Icon(Icons.expand_more_rounded,
-                                  color: scheme.onSurfaceVariant, size: 20),
-                            ],
+                                Icon(Icons.expand_more_rounded,
+                                    color: scheme.onSurfaceVariant, size: 20),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ] else
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.orange.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.checklist_rtl_rounded,
+                                color: AppTheme.orange, size: 18),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Colaboradores do setor Comercial seguem requisitos '
+                                'em vez de bônus/pontos.',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.orange,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
 
                     const SizedBox(height: 28),
                     Column(
@@ -566,6 +664,98 @@ class _CadastroColaboradorPageState extends State<CadastroColaboradorPage> {
 class _SeletorBonusResultado {
   final Bonus? bonus;
   const _SeletorBonusResultado(this.bonus);
+}
+
+/// Bottom sheet que lista os setores disponíveis para seleção.
+class _SeletorSetorSheet extends StatelessWidget {
+  final List<String> setores;
+  final String? setorSelecionado;
+
+  const _SeletorSetorSheet({
+    required this.setores,
+    required this.setorSelecionado,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.7,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: scheme.outline,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Selecionar setor',
+                        style: GoogleFonts.raleway(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: scheme.onSurface,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      tooltip: 'Fechar',
+                      style: ButtonStyle(
+                        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+                      ),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.only(bottom: 16),
+                  children: [
+                    for (final setor in setores)
+                      ListTile(
+                        leading: Icon(
+                          Icons.apartment_outlined,
+                          color: setorSelecionado == setor
+                              ? AppTheme.orange
+                              : scheme.onSurfaceVariant,
+                        ),
+                        title: Text(
+                          setor,
+                          style: GoogleFonts.nunito(fontWeight: FontWeight.w600),
+                        ),
+                        trailing: setorSelecionado == setor
+                            ? const Icon(Icons.check_rounded, color: AppTheme.orange)
+                            : null,
+                        onTap: () => Navigator.of(context).pop(setor),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Bottom sheet que lista os bônus existentes para seleção.

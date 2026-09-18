@@ -1,38 +1,60 @@
 import 'package:flutter/material.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:provider/provider.dart';
 
 import '../models/bonus.dart';
+import '../models/colaborador.dart';
 import '../providers/bonus_provider.dart';
+import '../providers/checklist_comercial_provider.dart';
 import '../providers/colaborador_provider.dart';
 import '../providers/lancamento_bonus_provider.dart';
 import '../providers/usuario_provider.dart';
+import '../utils/relatorio_checklist_comercial_pdf.dart';
 import '../utils/relatorio_penalidades_pdf.dart';
 import '../utils/seletor_mes_ano_relatorio.dart';
 
+/// Nome do setor que ativa a lógica de requisitos/checklist (em vez de
+/// pontos/bônus). Mesmo valor usado no seletor de setor do cadastro de
+/// colaborador — ver cadastro_colaborador_page.dart.
+const String setorComercial = 'Comercial';
+
 /// Abre um seletor de mês/ano (usando o mês/ano atuais) e, em seguida,
-/// gera um único PDF com o relatório de penalidades de TODOS os
-/// colaboradores carregados no [ColaboradorProvider].
+/// gera um único PDF com o relatório de TODOS os colaboradores
+/// carregados no [ColaboradorProvider] — colaboradores de bônus e do
+/// setor Comercial entram juntos, cada um com a seção correspondente
+/// ao seu tipo (bônus/pontos ou requisitos/checklist).
 ///
-/// Busca o histórico de lançamentos de cada colaborador no período
-/// selecionado e, quando o colaborador tem um bônus vinculado, também
-/// busca o DETALHE do [Bonus] correspondente (para exibir as
-/// categorias/observações completas no PDF — o endpoint de listagem
-/// não traz esses dados).
-Future<void> abrirRelatorioGeralPenalidades(BuildContext context) async {
+/// Por padrão gera o relatório de TODOS os colaboradores carregados no
+/// [ColaboradorProvider]. Passando [colaboradoresFiltrados] (ex.: apenas
+/// os colaboradores de um setor específico), o relatório é restrito a
+/// esse subconjunto — usado quando o relatório é aberto de dentro da
+/// página de um setor específico.
+Future<void> abrirRelatorioGeralPenalidades(
+  BuildContext context, {
+  List<Colaborador>? colaboradoresFiltrados,
+  String? setor,
+}) async {
   final token = context.read<UsuarioProvider>().token;
   if (token == null) return;
 
   final colaboradorProvider = context.read<ColaboradorProvider>();
   final lancamentoProvider = context.read<LancamentoBonusProvider>();
   final bonusProvider = context.read<BonusProvider>();
+  final checklistProvider = context.read<ChecklistComercialProvider>();
 
-  final colaboradores = colaboradorProvider.colaboradores;
+  final colaboradores =
+      colaboradoresFiltrados ?? colaboradorProvider.colaboradores;
   if (colaboradores.isEmpty) return;
+
+  final tituloSelecao = setor == null ? 'Relatório geral' : 'Relatório · $setor';
+  final subtituloSelecao = setor == null
+      ? 'Selecione o mês do relatório de todos os colaboradores'
+      : 'Selecione o mês do relatório dos colaboradores de $setor';
 
   final escolha = await selecionarMesAnoRelatorio(
     context,
-    titulo: 'Relatório geral',
-    subtitulo: 'Selecione o mês do relatório de todos os colaboradores',
+    titulo: tituloSelecao,
+    subtitulo: subtituloSelecao,
   );
   if (escolha == null || !context.mounted) return;
 
@@ -40,8 +62,6 @@ Future<void> abrirRelatorioGeralPenalidades(BuildContext context) async {
 
   final navigator = Navigator.of(context, rootNavigator: true);
 
-  // Mostra um indicador de progresso enquanto os dados de todos os
-  // colaboradores são buscados e o PDF é montado.
   showDialog(
     context: context,
     barrierDismissible: false,
@@ -49,25 +69,19 @@ Future<void> abrirRelatorioGeralPenalidades(BuildContext context) async {
   );
 
   try {
-    // Cache local dos DETALHES de bônus já buscados nesta geração de
-    // relatório, para não buscar o mesmo bônus mais de uma vez quando
-    // vários colaboradores compartilham o mesmo bônus.
-    //
-    // IMPORTANTE: não dá pra usar `bonusProvider.lista` (via
-    // `bonusProvider.carregar`) aqui. O endpoint de listagem usado por
-    // `carregar()` retorna os bônus "resumidos", sem `categorias` /
-    // `observacoes` populadas — só o endpoint de detalhe (`buscar`,
-    // usado por `carregarDetalhe`) retorna isso completo. É por isso
-    // que o relatório individual (que usa `bonusProvider.bonusAtual`,
-    // populado por `carregarDetalhe`) sempre mostrou as observações
-    // corretamente, enquanto o geral não. Por isso aqui buscamos o
-    // detalhe de cada bônus distinto, do mesmo jeito que a tela de
-    // pontuação faz para o relatório individual.
-    final detalhesBonus = <int, Bonus>{};
+    // Separa os colaboradores pelo setor: os do Comercial seguem a
+    // lógica de requisitos/checklist, os demais seguem a lógica de
+    // bônus/pontos já existente.
+    final colaboradoresBonus =
+        colaboradores.where((c) => c.setor != setorComercial).toList();
+    final colaboradoresComercial =
+        colaboradores.where((c) => c.setor == setorComercial).toList();
 
+    // ── Seção de bônus/pontos ──────────────────────────────────────
+    final detalhesBonus = <int, Bonus>{};
     final dadosPorColaborador = <DadosRelatorioColaborador>[];
 
-    for (final colaborador in colaboradores) {
+    for (final colaborador in colaboradoresBonus) {
       await lancamentoProvider.carregarHistorico(
         token: token,
         colaboradorId: colaborador.id,
@@ -83,10 +97,7 @@ Future<void> abrirRelatorioGeralPenalidades(BuildContext context) async {
         if (detalhesBonus.containsKey(bonusId)) {
           bonus = detalhesBonus[bonusId];
         } else {
-          final erro = await bonusProvider.carregarDetalhe(
-            token: token,
-            id: bonusId,
-          );
+          final erro = await bonusProvider.carregarDetalhe(token: token, id: bonusId);
           if (erro == null && bonusProvider.bonusAtual?.id == bonusId) {
             bonus = bonusProvider.bonusAtual;
             detalhesBonus[bonusId] = bonus!;
@@ -104,22 +115,132 @@ Future<void> abrirRelatorioGeralPenalidades(BuildContext context) async {
       );
     }
 
-    final resumoMotivosGeral = await lancamentoProvider.buscarResumoMotivos(
-      token: token,
-      mes: mes,
-      ano: ano,
-      colaboradorIds: colaboradores.map((c) => c.id).toList(),
-    );
+    final resumoMotivosGeral = colaboradoresBonus.isEmpty
+        ? const <dynamic>[]
+        : await lancamentoProvider.buscarResumoMotivos(
+            token: token,
+            mes: mes,
+            ano: ano,
+            colaboradorIds: colaboradoresBonus.map((c) => c.id).toList(),
+          );
 
-    await gerarRelatorioGeralPenalidadesPdf(
+    // ── Seção comercial (requisitos/checklist) ─────────────────────
+    final dadosPorColaboradorComercial = <DadosRelatorioComercial>[];
+
+    for (final colaborador in colaboradoresComercial) {
+      await checklistProvider.carregarHistorico(
+        token: token,
+        colaboradorId: colaborador.id,
+        mes: mes,
+        ano: ano,
+      );
+
+      dadosPorColaboradorComercial.add(
+        DadosRelatorioComercial(
+          colaborador: colaborador,
+          checklists: List.of(checklistProvider.historico),
+        ),
+      );
+    }
+
+    // ── Monta o PDF geral: bônus primeiro, comercial depois ────────
+    final subtituloFinal = setor ?? 'Todos os colaboradores';
+    final nomeArquivo = setor == null
+        ? null
+        : 'relatorio_${gerarNomeArquivoSeguro(setor)}_${ano}_${mes.toString().padLeft(2, '0')}';
+
+    await _gerarRelatorioGeralMisto(
       mes: mes,
       ano: ano,
       dadosPorColaborador: dadosPorColaborador,
-      resumoMotivosGeral: resumoMotivosGeral,
+      resumoMotivosGeral: resumoMotivosGeral.cast(),
+      dadosPorColaboradorComercial: dadosPorColaboradorComercial,
+      subtitulo: subtituloFinal,
+      nomeArquivo: nomeArquivo,
     );
   } finally {
     if (navigator.canPop()) {
       navigator.pop();
     }
   }
+}
+
+/// Monta um único documento PDF com a seção de bônus (resumo de
+/// motivos + estatísticas + página por colaborador) seguida da seção
+/// comercial (resumo de requisitos + página por colaborador), quando
+/// houver colaboradores de cada tipo. Quando só há um dos dois tipos,
+/// a seção do outro simplesmente não aparece no PDF.
+Future<void> _gerarRelatorioGeralMisto({
+  required int mes,
+  required int ano,
+  required List<DadosRelatorioColaborador> dadosPorColaborador,
+  required List<dynamic> resumoMotivosGeral,
+  required List<DadosRelatorioComercial> dadosPorColaboradorComercial,
+  required String subtitulo,
+  String? nomeArquivo,
+}) async {
+  // Gera cada seção usando os geradores já existentes (que produzem
+  // documentos PDF completos e independentes) e depois junta as
+  // páginas de todos em um único arquivo final — evita duplicar aqui
+  // a lógica interna de cada relatório.
+  if (dadosPorColaborador.isNotEmpty && dadosPorColaboradorComercial.isEmpty) {
+    // Só bônus: comportamento idêntico ao que já existia.
+    await gerarRelatorioGeralPenalidadesPdf(
+      mes: mes,
+      ano: ano,
+      dadosPorColaborador: dadosPorColaborador,
+      resumoMotivosGeral: resumoMotivosGeral.cast(),
+      subtitulo: subtitulo,
+      nomeArquivo: nomeArquivo,
+    );
+    return;
+  }
+
+  if (dadosPorColaboradorComercial.isNotEmpty && dadosPorColaborador.isEmpty) {
+    // Só comercial: monta um documento próprio com a seção comercial.
+    final doc = pw.Document();
+    final logoImage = await carregarLogoRelatorio();
+    await gerarSecaoComercialRelatorioGeral(
+      doc: doc,
+      mes: mes,
+      ano: ano,
+      dadosPorColaborador: dadosPorColaboradorComercial,
+      logoImage: logoImage,
+      subtitulo: subtitulo,
+    );
+    final nomeFinal = nomeArquivo != null
+        ? '$nomeArquivo.pdf'
+        : 'relatorio_geral_${ano}_${mes.toString().padLeft(2, '0')}.pdf';
+    await salvarEAbrirPdfCompartilhado(doc, nomeFinal);
+    return;
+  }
+
+  // Mistura os dois: gera as páginas de bônus e as páginas comerciais
+  // no mesmo pw.Document.
+  final doc = pw.Document();
+  final logoImage = await carregarLogoRelatorio();
+
+  await adicionarPaginasBonusAoDocumento(
+    doc: doc,
+    mes: mes,
+    ano: ano,
+    dadosPorColaborador: dadosPorColaborador,
+    resumoMotivosGeral: resumoMotivosGeral.cast(),
+    logoImage: logoImage,
+    subtitulo: subtitulo,
+  );
+
+  await gerarSecaoComercialRelatorioGeral(
+    doc: doc,
+    mes: mes,
+    ano: ano,
+    dadosPorColaborador: dadosPorColaboradorComercial,
+    logoImage: logoImage,
+    subtitulo: subtitulo,
+  );
+
+  final nomeFinal = nomeArquivo != null
+      ? '$nomeArquivo.pdf'
+      : 'relatorio_geral_${ano}_${mes.toString().padLeft(2, '0')}.pdf';
+  await salvarEAbrirPdfCompartilhado(doc, nomeFinal);
 }

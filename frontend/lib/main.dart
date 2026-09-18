@@ -14,6 +14,8 @@ import 'providers/bonus_provider.dart';
 import 'providers/lancamento_bonus_provider.dart';
 import 'providers/motivo_bonus_provider.dart';
 import 'providers/visao_geral_provider.dart';
+import 'providers/requisito_comercial_provider.dart';
+import 'providers/checklist_comercial_provider.dart';
 import 'theme/app_theme.dart';
 import 'widgets/theme_transition.dart';
 import 'widgets/update_checker_widget.dart';
@@ -29,6 +31,9 @@ import 'pages/usuarios_page.dart';
 import 'pages/bonus_page.dart';
 import 'pages/detalhe_bonus_page.dart';
 import 'pages/motivos_bonus_page.dart';
+import 'pages/checklist_colaborador_page.dart';
+import 'pages/historico_checklists_comercial_page.dart';
+import 'pages/requisitos_comerciais_page.dart';
 import 'models/colaborador.dart';
 import 'models/usuario.dart';
 import 'models/bonus.dart';
@@ -80,6 +85,8 @@ class VisualPremiumApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => LancamentoBonusProvider()),
         ChangeNotifierProvider(create: (_) => MotivoBonusProvider()),
         ChangeNotifierProvider(create: (_) => VisaoGeralProvider()),
+        ChangeNotifierProvider(create: (_) => RequisitoComercialProvider()),
+        ChangeNotifierProvider(create: (_) => ChecklistComercialProvider()),
       ],
       child: const _AppRoot(),
     );
@@ -193,6 +200,24 @@ class _AppRootState extends State<_AppRoot> {
               colaborador: extra as Colaborador,
             );
           },
+        ),
+
+        // ── Comercial (requisitos/checklist) ───────────────────────────
+        GoRoute(
+          path: '/colaboradores/checklist',
+          builder: (context, state) => ChecklistColaboradorPage(
+            colaborador: state.extra as Colaborador,
+          ),
+        ),
+        GoRoute(
+          path: '/colaboradores/checklist/historico',
+          builder: (context, state) => HistoricoChecklistsComercialPage(
+            colaborador: state.extra as Colaborador,
+          ),
+        ),
+        GoRoute(
+          path: '/requisitos',
+          builder: (context, state) => const RequisitosComerciaisPage(),
         ),
 
         // ── Bônus ───────────────────────────────────────────────────────

@@ -124,69 +124,31 @@ Future<void> gerarRelatorioGeralPenalidadesPdf({
   required int ano,
   required List<DadosRelatorioColaborador> dadosPorColaborador,
   List<ResumoMotivo> resumoMotivosGeral = const [],
+  // Permite gerar um relatório "geral" restrito a um subconjunto de
+  // colaboradores (ex.: só os de um setor). [subtitulo] aparece no
+  // cabeçalho das páginas de resumo/estatísticas e [nomeArquivo]
+  // sobrescreve o nome padrão do PDF gerado (sem a extensão .pdf).
+  String subtitulo = 'Todos os colaboradores',
+  String? nomeArquivo,
 }) async {
   final doc = pw.Document();
   final logoImage = await _carregarLogo();
 
-  doc.addPage(
-    _paginaResumoMotivos(
-      mes: mes,
-      ano: ano,
-      resumoMotivos: resumoMotivosGeral,
-      logoImage: logoImage,
-      subtitulo: 'Todos os colaboradores',
-    ),
+  await adicionarPaginasBonusAoDocumento(
+    doc: doc,
+    mes: mes,
+    ano: ano,
+    dadosPorColaborador: dadosPorColaborador,
+    logoImage: logoImage,
+    resumoMotivosGeral: resumoMotivosGeral,
+    subtitulo: subtitulo,
   );
 
-  doc.addPage(
-    _paginaEstatisticas(
-      mes: mes,
-      ano: ano,
-      resumoMotivos: resumoMotivosGeral,
-      // Concatena os lançamentos de TODOS os colaboradores para o
-      // gráfico de penalidades por dia do mês (agregado geral).
-      lancamentos: [
-        for (final dados in dadosPorColaborador) ...dados.lancamentos,
-      ],
-      logoImage: logoImage,
-      subtitulo: 'Todos os colaboradores',
-      // Ranking de colaboradores com mais penalidades no período,
-      // ordenado pela QUANTIDADE de lançamentos (não pelos pontos
-      // descontados) — também exibe o total de pontos de cada um, mas
-      // isso é só informativo, não afeta a posição no ranking. Só faz
-      // sentido no relatório geral (múltiplos colaboradores).
-      rankingColaboradores: [
-        for (final dados in dadosPorColaborador)
-          _RankingColaborador(
-            nome: dados.colaborador.nome,
-            total: dados.lancamentos.fold<int>(
-              0,
-              (soma, l) => soma + l.pontos.abs(),
-            ),
-            quantidade: dados.lancamentos.length,
-          ),
-      ]..sort((a, b) => b.quantidade.compareTo(a.quantidade)),
-    ),
-  );
+  final nomeArquivoFinal = nomeArquivo != null
+      ? '$nomeArquivo.pdf'
+      : 'relatorio_geral_${ano}_${mes.toString().padLeft(2, '0')}.pdf';
 
-  for (final dados in dadosPorColaborador) {
-    doc.addPage(
-      await _paginaColaborador(
-        colaborador: dados.colaborador,
-        mes: mes,
-        ano: ano,
-        lancamentos: dados.lancamentos,
-        pontosIniciais: dados.pontosIniciais,
-        bonus: dados.bonus,
-        logoImage: logoImage,
-      ),
-    );
-  }
-
-  final nomeArquivo =
-      'relatorio_geral_${ano}_${mes.toString().padLeft(2, '0')}.pdf';
-
-  await _salvarEAbrir(doc, nomeArquivo);
+  await _salvarEAbrir(doc, nomeArquivoFinal);
 }
 
 /// Gera um PDF contendo APENAS a página de resumo por motivo (a mesma
@@ -218,10 +180,80 @@ Future<void> gerarRelatorioMotivosPdf({
   await _salvarEAbrir(doc, nomeArquivo);
 }
 
-Future<pw.MemoryImage> _carregarLogo() async {
+Future<pw.MemoryImage> _carregarLogo() => carregarLogoRelatorio();
+
+/// Carrega a logo institucional usada em todos os relatórios (bônus e
+/// comercial). Exposta (sem `_`) para reaproveitamento externo — ver
+/// relatorio_geral_penalidades.dart, que monta um documento único
+/// misturando páginas de bônus e páginas comerciais.
+Future<pw.MemoryImage> carregarLogoRelatorio() async {
   // Logo da empresa (assets/images/logoPreta.png)
   final logoBytes = await rootBundle.load('assets/images/logoPreta.png');
   return pw.MemoryImage(logoBytes.buffer.asUint8List());
+}
+
+/// Adiciona ao [doc] as páginas de resumo de motivos, estatísticas e
+/// detalhe por colaborador da seção de BÔNUS — a mesma sequência de
+/// páginas que [gerarRelatorioGeralPenalidadesPdf] monta internamente,
+/// extraída aqui para poder ser combinada com outras seções (como a
+/// comercial) num único documento. [gerarRelatorioGeralPenalidadesPdf]
+/// continua existindo e usando esta mesma função por baixo, para que
+/// o relatório "só bônus" não mude de comportamento.
+Future<void> adicionarPaginasBonusAoDocumento({
+  required pw.Document doc,
+  required int mes,
+  required int ano,
+  required List<DadosRelatorioColaborador> dadosPorColaborador,
+  required pw.MemoryImage logoImage,
+  List<ResumoMotivo> resumoMotivosGeral = const [],
+  String subtitulo = 'Todos os colaboradores',
+}) async {
+  if (dadosPorColaborador.isEmpty) return;
+
+  doc.addPage(
+    _paginaResumoMotivos(
+      mes: mes,
+      ano: ano,
+      resumoMotivos: resumoMotivosGeral,
+      logoImage: logoImage,
+      subtitulo: subtitulo,
+    ),
+  );
+
+  doc.addPage(
+    _paginaEstatisticas(
+      mes: mes,
+      ano: ano,
+      resumoMotivos: resumoMotivosGeral,
+      lancamentos: [
+        for (final dados in dadosPorColaborador) ...dados.lancamentos,
+      ],
+      logoImage: logoImage,
+      subtitulo: subtitulo,
+      rankingColaboradores: [
+        for (final dados in dadosPorColaborador)
+          _RankingColaborador(
+            nome: dados.colaborador.nome,
+            total: dados.lancamentos.fold<int>(0, (soma, l) => soma + l.pontos.abs()),
+            quantidade: dados.lancamentos.length,
+          ),
+      ]..sort((a, b) => b.quantidade.compareTo(a.quantidade)),
+    ),
+  );
+
+  for (final dados in dadosPorColaborador) {
+    doc.addPage(
+      await _paginaColaborador(
+        colaborador: dados.colaborador,
+        mes: mes,
+        ano: ano,
+        lancamentos: dados.lancamentos,
+        pontosIniciais: dados.pontosIniciais,
+        bonus: dados.bonus,
+        logoImage: logoImage,
+      ),
+    );
+  }
 }
 
 /// Imagem já baixada de um lançamento, junto da URL original — usada
@@ -283,7 +315,14 @@ Future<Map<int, _ImagemLancamento>> _carregarImagensLancamentos(
   return imagens;
 }
 
-Future<void> _salvarEAbrir(pw.Document doc, String nomeArquivo) async {
+Future<void> _salvarEAbrir(pw.Document doc, String nomeArquivo) =>
+    salvarEAbrirPdfCompartilhado(doc, nomeArquivo);
+
+/// Salva o PDF em disco e abre com o visualizador padrão do sistema.
+/// Exposta (sem `_`) para reaproveitamento por outros geradores de PDF
+/// do app, como relatorio_checklist_comercial_pdf.dart — mesmo
+/// comportamento usado por todo relatório gerado aqui.
+Future<void> salvarEAbrirPdfCompartilhado(pw.Document doc, String nomeArquivo) async {
   final bytes = await doc.save();
 
   // Salva o arquivo e abre com o visualizador de PDF padrão do sistema
@@ -295,9 +334,18 @@ Future<void> _salvarEAbrir(pw.Document doc, String nomeArquivo) async {
   await OpenFilex.open(arquivo.path);
 }
 
+/// Sanitiza um nome (ex.: nome do colaborador) para uso seguro em nome
+/// de arquivo, removendo qualquer caractere que não seja alfanumérico.
+/// Mesma regra já usada inline em vários pontos deste arquivo
+/// (`RegExp(r'[^\w]+')`), extraída aqui para reaproveitamento externo.
+String gerarNomeArquivoSeguro(String nome) => nome.replaceAll(RegExp(r'[^\w]+'), '_');
+
 /// Cabeçalho institucional (logo + dados da empresa) compartilhado entre a
 /// página de resumo de motivos e a página de detalhe do colaborador.
-pw.Widget _cabecalhoInstitucional({
+/// Exposta (sem `_`) para reaproveitamento externo — ver
+/// relatorio_checklist_comercial_pdf.dart, que usa o mesmo cabeçalho para
+/// padronizar visualmente o relatório comercial com o de bônus/penalidades.
+pw.Widget cabecalhoInstitucionalRelatorio({
   required pw.MemoryImage logoImage,
   required String rotulo,
   required int mes,
@@ -399,7 +447,7 @@ pw.MultiPage _paginaResumoMotivos({
       ),
     ),
     build: (context) => [
-        _cabecalhoInstitucional(
+        cabecalhoInstitucionalRelatorio(
           logoImage: logoImage,
           rotulo: 'RESUMO POR MOTIVO',
           mes: mes,
@@ -567,7 +615,7 @@ pw.MultiPage _paginaEstatisticas({
       ),
     ),
     build: (context) => [
-      _cabecalhoInstitucional(
+      cabecalhoInstitucionalRelatorio(
         logoImage: logoImage,
         rotulo: 'ESTATÍSTICAS',
         mes: mes,
@@ -795,10 +843,10 @@ pw.MultiPage _paginaEstatisticas({
 /// como barras horizontais compactas — uma por colaborador, com o nome,
 /// a barra proporcional ao maior total de pontos do ranking, e a
 /// quantidade de penalidades junto com o total de pontos descontados
-/// (ex.: "4 penalidades · 43 pts"). Limitado aos 10 primeiros para não
-/// estourar a página quando há muitos colaboradores.
+/// (ex.: "4 penalidades · 43 pts"). Exibe todos os colaboradores do
+/// ranking, sem limite de quantidade.
 pw.Widget _blocoRankingColaboradores(List<_RankingColaborador> ranking) {
-  final top = ranking.take(10).toList();
+  final top = ranking;
   final maiorQuantidade =
       top.first.quantidade == 0 ? 1 : top.first.quantidade;
 
@@ -1151,7 +1199,7 @@ Future<pw.Page> _paginaColaborador({
       ),
       build: (context) => [
         // ── Cabeçalho institucional (logo + dados da empresa + doc) ─────
-        _cabecalhoInstitucional(
+        cabecalhoInstitucionalRelatorio(
           logoImage: logoImage,
           rotulo: 'RELATÓRIO',
           mes: mes,
